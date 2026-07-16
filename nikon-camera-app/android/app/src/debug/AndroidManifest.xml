@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      测试宿主 Activity 在此 debug 变体 manifest 声明为 app 包(com.nikon.cameraconnect)的组件,
+      默认运行在 app 进程, 使用 app APK 的 classloader 加载。
+      原因(实测踩坑): 若把该 Activity 声明在 androidTest 清单(测试包 com.nikon.cameraconnect.test),
+      系统始终用"测试包 classloader"(测试 APK)加载它, 无论是否设 android:process:
+        - 类在测试 APK + 设 process=app → 测试包 classloader 在 app 进程找不到 androidx.activity.ComponentActivity(app APK) → ClassNotFound
+        - 类在测试 APK + 不设 process → 测试进程 Activity 被 app 进程 context 启动 → different process
+        - 类移到 app APK + 仍在测试包声明 → 测试包 classloader 找不到该类(类在 app APK) → ClassNotFound
+      改为在 app 包 manifest 声明后: Activity 归属 app 包 → 用 app 进程 classloader(app APK)加载,
+      类在 app APK → 加载成功, 同进程启动 → 不报 different process。两错误同时消除。
+    -->
+    <application>
+        <activity
+            android:name="com.nikon.app.TestComponentActivity"
+            android:exported="true" />
+    </application>
+
+</manifest>

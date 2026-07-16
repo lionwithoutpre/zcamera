@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nikon Connect</string>
+
+    <!-- 导航标签 -->
+    <string name="tab_home">主页</string>
+    <string name="tab_gallery">相册</string>
+    <string name="tab_transfer">传输</string>
+    <string name="tab_preset">预设</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- 操作 -->
+    <string name="btn_scan">扫描设备</string>
+    <string name="btn_connect">连接</string>
+    <string name="btn_disconnect">断开</string>
+    <string name="btn_capture">拍摄</string>
+    <string name="btn_transfer">传输到手机</string>
+    <string name="btn_retry">重试</string>
+    <string name="btn_cancel">取消</string>
+    <string name="btn_apply">应用预设</string>
+    <string name="btn_save">保存</string>
+
+    <!-- 状态 -->
+    <string name="status_scanning">正在扫描…</string>
+    <string name="status_connected">已连接</string>
+    <string name="status_disconnected">未连接</string>
+    <string name="status_transferring">传输中…</string>
+    <string name="status_error">错误</string>
+    <string name="label_battery">电量</string>
+    <string name="label_storage">存储</string>
+    <string name="label_no_devices">未发现尼康设备</string>
+    <string name="label_live_view">实时取景</string>
+</resources>

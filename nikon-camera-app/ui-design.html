@@ -1,0 +1,2314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nikon Camera Connect — UI 设计原型 v2</title>
+<style>
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --nk-yellow: #F5B800;
+    --nk-yellow-dim: #C49300;
+    --nk-yellow-glow: rgba(245,184,0,0.18);
+    --nk-black: #0E0E0E;
+    --nk-surface: #161616;
+    --nk-surface-2: #1E1E1E;
+    --nk-surface-3: #272727;
+    --nk-border: rgba(255,255,255,0.08);
+    --nk-border-active: rgba(245,184,0,0.5);
+    --nk-text: #F0F0F0;
+    --nk-text-2: #A0A0A0;
+    --nk-text-3: #616161;
+    --nk-red: #E03A3A;
+    --nk-red-dim: rgba(224,58,58,0.15);
+    --nk-green: #4CAF50;
+    --nk-blue: #5B9BD5;
+    --nk-orange: #F59300;
+    --nk-radius: 16px;
+    --nk-radius-sm: 10px;
+    --nk-radius-lg: 24px;
+    --nk-transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    --nk-shadow: 0 4px 32px rgba(0,0,0,0.6);
+    --nk-shadow-yellow: 0 0 24px rgba(245,184,0,0.25);
+    --nk-shadow-red: 0 0 20px rgba(224,58,58,0.25);
+    --phone-w: 390px;
+    --phone-h: 844px;
+  }
+
+  body {
+    background: #0a0a0a;
+    font-family: 'SF Pro Display', -apple-system, 'Roboto', 'Segoe UI', sans-serif;
+    color: var(--nk-text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .stage {
+    min-height: 100vh;
+    padding: 40px 24px 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .stage-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+  .brand-logo {
+    display: flex; align-items: center; justify-content: center;
+    gap: 10px; margin-bottom: 12px;
+  }
+  .logo-mark {
+    width: 36px; height: 36px;
+    background: var(--nk-yellow);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 18px; color: #000;
+  }
+  .logo-text { font-size: 20px; font-weight: 700; }
+  .stage-header p { font-size: 14px; color: var(--nk-text-2); }
+
+  /* 版本标记 */
+  .v-badge {
+    display: inline-flex; align-items: center;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 11px; font-weight: 700;
+    background: rgba(245,184,0,0.15);
+    color: var(--nk-yellow);
+    margin-left: 8px;
+  }
+
+  /* ── Phone Row ── */
+  .phones-row {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .phone-wrap {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 16px;
+  }
+  .phone-label {
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--nk-text-3);
+  }
+
+  .phone {
+    width: var(--phone-w);
+    height: var(--phone-h);
+    background: var(--nk-black);
+    border-radius: 48px;
+    border: 2px solid rgba(255,255,255,0.1);
+    box-shadow:
+      0 0 0 6px rgba(0,0,0,0.8),
+      0 0 0 7px rgba(255,255,255,0.06),
+      0 40px 80px rgba(0,0,0,0.8);
+    position: relative; overflow: hidden; flex-shrink: 0;
+  }
+  .phone::before {
+    content: '';
+    position: absolute;
+    top: 14px; left: 50%; transform: translateX(-50%);
+    width: 120px; height: 32px;
+    background: #000; border-radius: 20px;
+    z-index: 100;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.05);
+  }
+  .phone::after {
+    content: '';
+    position: absolute;
+    top: 24px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 10px;
+    background: #1a1a1a; border-radius: 50%;
+    z-index: 101;
+  }
+  .phone-screen {
+    position: absolute; inset: 0;
+    overflow: hidden; border-radius: 46px;
+  }
+
+  /* ── Base Screen ── */
+  .screen {
+    width: 100%; height: 100%;
+    background: var(--nk-black);
+    display: flex; flex-direction: column;
+    position: relative; font-size: 14px;
+  }
+
+  .status-bar {
+    height: 52px;
+    padding: 16px 24px 0;
+    display: flex; align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    position: relative; z-index: 10;
+  }
+  .status-time { font-size: 15px; font-weight: 600; }
+  .status-icons { display: flex; align-items: center; gap: 6px; }
+  .status-icons svg { width: 16px; height: 16px; fill: var(--nk-text); }
+
+  .app-bar {
+    padding: 12px 20px 8px;
+    display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0;
+  }
+  .app-bar-title { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .app-bar-title span { color: var(--nk-yellow); }
+  .icon-btn {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: var(--nk-surface-2);
+    border: 1px solid var(--nk-border);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .icon-btn svg { width: 20px; height: 20px; fill: var(--nk-text); }
+
+  .screen-content {
+    flex: 1; overflow-y: auto;
+    padding: 0 16px 16px;
+    scrollbar-width: none;
+  }
+  .screen-content::-webkit-scrollbar { display: none; }
+
+  /* ── Card ── */
+  .card {
+    background: var(--nk-surface);
+    border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius);
+    padding: 16px; margin-bottom: 12px;
+  }
+  .card-active {
+    border-color: var(--nk-border-active);
+    box-shadow: var(--nk-shadow-yellow);
+    background: linear-gradient(135deg, #1A1600 0%, var(--nk-surface) 60%);
+  }
+  .card-error {
+    border-color: rgba(224,58,58,0.4);
+    box-shadow: var(--nk-shadow-red);
+    background: linear-gradient(135deg, #1A0000 0%, var(--nk-surface) 60%);
+  }
+
+  /* ── Section Label ── */
+  .section-label {
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--nk-text-3);
+    margin: 20px 0 10px 4px;
+  }
+
+  /* ── Pill ── */
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 100px;
+    font-size: 11px; font-weight: 600;
+  }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pill-connected { background: rgba(76,175,80,0.15); color: #4CAF50; }
+  .pill-connected .pill-dot { background: #4CAF50; animation: pulse-green 2s infinite; }
+  .pill-scanning { background: rgba(91,155,213,0.15); color: var(--nk-blue); }
+  .pill-scanning .pill-dot { background: var(--nk-blue); animation: pulse-blue 1s infinite; }
+  .pill-error { background: rgba(224,58,58,0.15); color: var(--nk-red); }
+  .pill-error .pill-dot { background: var(--nk-red); animation: pulse-red 1.5s infinite; }
+  .pill-idle { background: rgba(255,255,255,0.06); color: var(--nk-text-3); }
+  .pill-idle .pill-dot { background: var(--nk-text-3); }
+  .pill-wifi { background: rgba(245,184,0,0.12); color: var(--nk-yellow); }
+  .pill-wifi .pill-dot { background: var(--nk-yellow); }
+
+  @keyframes pulse-green { 0%,100%{opacity:1;box-shadow:0 0 6px #4CAF50} 50%{opacity:0.4;box-shadow:none} }
+  @keyframes pulse-blue { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  @keyframes pulse-red { 0%,100%{opacity:1;box-shadow:0 0 6px var(--nk-red)} 50%{opacity:0.4;box-shadow:none} }
+
+  /* ── Progress Bar ── */
+  .progress-bar {
+    height: 4px; background: var(--nk-surface-3);
+    border-radius: 100px; overflow: hidden; margin: 8px 0;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 100px;
+    background: linear-gradient(90deg, var(--nk-yellow-dim), var(--nk-yellow));
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .progress-fill-anim {
+    background: linear-gradient(90deg, var(--nk-yellow-dim), var(--nk-yellow), #FFD740);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s linear infinite;
+  }
+  .progress-fill-red { background: linear-gradient(90deg, #a02020, var(--nk-red)) !important; }
+  @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+
+  /* ── Button ── */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 14px 20px; border-radius: var(--nk-radius);
+    font-size: 14px; font-weight: 700;
+    border: none; cursor: pointer;
+    transition: transform var(--nk-transition), box-shadow var(--nk-transition);
+    letter-spacing: 0.3px;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--nk-yellow); color: #000; box-shadow: 0 4px 20px rgba(245,184,0,0.35); }
+  .btn-primary:hover { box-shadow: 0 6px 28px rgba(245,184,0,0.5); }
+  .btn-secondary { background: var(--nk-surface-2); color: var(--nk-text); border: 1px solid var(--nk-border); }
+  .btn-ghost { background: transparent; color: var(--nk-yellow); border: 1px solid var(--nk-border-active); }
+  .btn-danger { background: rgba(224,58,58,0.15); color: var(--nk-red); border: 1px solid rgba(224,58,58,0.3); }
+  .btn-warning { background: rgba(245,147,0,0.15); color: var(--nk-orange); border: 1px solid rgba(245,147,0,0.3); }
+  .btn svg { width: 18px; height: 18px; }
+
+  /* ── Row Item ── */
+  .row-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px;
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius-sm); margin-bottom: 8px;
+    cursor: pointer;
+    transition: background var(--nk-transition), border-color var(--nk-transition);
+  }
+  .row-item:hover { background: var(--nk-surface-3); }
+  .row-item.active-row { border-color: var(--nk-border-active); background: rgba(245,184,0,0.06); }
+  .row-icon {
+    width: 40px; height: 40px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .row-icon svg { width: 22px; height: 22px; }
+  .row-icon.yellow { background: var(--nk-yellow-glow); }
+  .row-icon.yellow svg { fill: var(--nk-yellow); }
+  .row-icon.gray { background: var(--nk-surface-3); }
+  .row-icon.gray svg { fill: var(--nk-text-2); }
+  .row-icon.green { background: rgba(76,175,80,0.12); }
+  .row-icon.green svg { fill: var(--nk-green); }
+  .row-icon.red { background: rgba(224,58,58,0.12); }
+  .row-icon.red svg { fill: var(--nk-red); }
+  .row-info { flex: 1; min-width: 0; }
+  .row-title { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .row-subtitle { font-size: 12px; color: var(--nk-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-end { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+
+  /* ── Bottom Nav ── */
+  .bottom-nav {
+    height: 72px;
+    background: var(--nk-surface); border-top: 1px solid var(--nk-border);
+    display: flex; align-items: center;
+    padding: 0 8px 8px; flex-shrink: 0;
+  }
+  .nav-item {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; gap: 4px;
+    padding: 8px 4px 4px; cursor: pointer;
+    border-radius: 12px;
+    transition: background var(--nk-transition);
+  }
+  .nav-item svg { width: 22px; height: 22px; fill: var(--nk-text-3); }
+  .nav-item span { font-size: 10px; font-weight: 600; color: var(--nk-text-3); }
+  .nav-item.active svg { fill: var(--nk-yellow); }
+  .nav-item.active span { color: var(--nk-yellow); }
+
+  /* ── Param Grid ── */
+  .param-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 8px; margin-bottom: 12px;
+  }
+  .param-cell {
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius-sm);
+    padding: 12px 10px; text-align: center;
+    position: relative;
+    transition: border-color var(--nk-transition);
+  }
+  /* ✅ 参数刷新动效 */
+  .param-cell.refreshing { animation: param-flash 0.4s ease; }
+  @keyframes param-flash {
+    0% { border-color: var(--nk-yellow); background: rgba(245,184,0,0.12); }
+    100% { border-color: var(--nk-border); background: var(--nk-surface-2); }
+  }
+  .param-label { font-size: 10px; color: var(--nk-text-3); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .param-value { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+  .param-value.yellow { color: var(--nk-yellow); }
+  /* 刷新指示点 */
+  .param-refresh-dot {
+    position: absolute; top: 6px; right: 6px;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--nk-yellow);
+    animation: dot-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes dot-pulse { 0%,100%{opacity:0.8;transform:scale(1)} 50%{opacity:0.2;transform:scale(0.6)} }
+
+  /* ── LiveView ── */
+  .liveview-overlay { position: absolute; inset: 0; pointer-events: none; }
+  .af-box {
+    position: absolute; width: 80px; height: 54px;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    border: 1.5px solid var(--nk-yellow);
+    box-shadow: 0 0 12px rgba(245,184,0,0.4);
+  }
+  .af-box::before, .af-box::after { content:''; position:absolute; width:10px; height:10px; }
+  .af-box::before { top:-1.5px; left:-1.5px; border-top:3px solid var(--nk-yellow); border-left:3px solid var(--nk-yellow); }
+  .af-box::after { bottom:-1.5px; right:-1.5px; border-bottom:3px solid var(--nk-yellow); border-right:3px solid var(--nk-yellow); }
+  .grid-lines {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: 33.33% 33.33%;
+  }
+  .hud-params {
+    position: absolute; bottom: 10px; left: 10px; right: 10px;
+    display: flex; justify-content: space-between;
+  }
+  .hud-tag {
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+    border-radius: 6px; padding: 4px 8px;
+    font-size: 12px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition: background 0.15s;
+    pointer-events: all;
+  }
+  .hud-tag:hover { background: rgba(245,184,0,0.3); color: var(--nk-yellow); }
+  .hud-tag.yellow { color: var(--nk-yellow); }
+  .hud-tag.active-param { background: rgba(245,184,0,0.4); color: var(--nk-yellow); border: 1px solid var(--nk-yellow); }
+  .rec-indicator {
+    position: absolute; top: 10px; left: 10px;
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    border-radius: 6px; padding: 4px 8px;
+    font-size: 11px; font-weight: 700; color: var(--nk-red);
+  }
+  .rec-dot { width:6px;height:6px;border-radius:50%;background:var(--nk-red); animation:rec-blink 1s ease-in-out infinite; }
+  @keyframes rec-blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+  .histogram {
+    position: absolute; top: 10px; right: 10px;
+    width: 80px; height: 40px;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    border-radius: 6px; overflow: hidden;
+    display: flex; align-items: flex-end; gap: 1px; padding: 4px;
+  }
+  .hist-bar {
+    flex: 1;
+    background: linear-gradient(to top, rgba(255,255,255,0.7), rgba(255,255,255,0.2));
+    border-radius: 1px;
+  }
+  /* ✅ 快门/连拍/控制按钮 */
+  .shutter-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; padding: 8px 0;
+  }
+  .shutter-btn {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: var(--nk-yellow);
+    border: 4px solid rgba(245,184,0,0.3);
+    box-shadow: 0 0 0 2px var(--nk-yellow), var(--nk-shadow-yellow);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+  .shutter-btn:active { transform: scale(0.93); }
+  .shutter-inner { width:52px;height:52px;border-radius:50%;background:#fff;border:2px solid rgba(0,0,0,0.1); }
+  .ctrl-btn {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--nk-surface-2);
+    border: 1px solid var(--nk-border);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .ctrl-btn svg { width: 20px; height: 20px; fill: var(--nk-text-2); }
+  .ctrl-btn.active-ctrl { border-color: var(--nk-yellow); background: rgba(245,184,0,0.1); }
+  .ctrl-btn.active-ctrl svg { fill: var(--nk-yellow); }
+
+  /* ✅ AF 模式切换按钮组 */
+  .af-mode-group {
+    display: flex; gap: 4px; pointer-events: all;
+  }
+  .af-btn {
+    padding: 4px 9px; border-radius: 6px;
+    font-size: 11px; font-weight: 700;
+    background: rgba(0,0,0,0.6); color: var(--nk-text-2);
+    border: 1px solid rgba(255,255,255,0.12);
+    cursor: pointer;
+  }
+  .af-btn.active { background: var(--nk-yellow); color: #000; border-color: var(--nk-yellow); }
+
+  /* ✅ 变焦控制 */
+  .zoom-control {
+    display: flex; align-items: center; gap: 6px;
+    pointer-events: all;
+  }
+  .zoom-btn {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--nk-text); font-size: 16px; font-weight: 700;
+    line-height: 1;
+  }
+  .zoom-label {
+    font-size: 12px; font-weight: 800;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+    border-radius: 6px; padding: 3px 8px; min-width: 40px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Transfer Items ── */
+  .transfer-item {
+    background: var(--nk-surface); border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius);
+    padding: 14px 16px; margin-bottom: 10px;
+    position: relative; overflow: hidden;
+  }
+  .transfer-item.active-transfer { border-color: var(--nk-border-active); }
+  /* ✅ 失败状态 */
+  .transfer-item.failed {
+    border-color: rgba(224,58,58,0.4);
+    background: linear-gradient(135deg, rgba(224,58,58,0.06) 0%, var(--nk-surface) 50%);
+  }
+  .transfer-progress-bg {
+    position: absolute; inset: 0; right: auto;
+    background: rgba(245,184,0,0.04); transition: width 1s ease;
+  }
+  .transfer-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; position: relative; z-index: 1;
+  }
+  .transfer-file-info { display: flex; align-items: center; gap: 10px; }
+  .file-thumb {
+    width: 44px; height: 32px; border-radius: 6px;
+    overflow: hidden; flex-shrink: 0;
+    border: 1px solid var(--nk-border); position: relative;
+  }
+  .file-name { font-size: 13px; font-weight: 600; }
+  .file-meta { font-size: 11px; color: var(--nk-text-2); margin-top: 2px; }
+  .transfer-speed { font-size: 12px; font-weight: 700; color: var(--nk-yellow); font-variant-numeric: tabular-nums; }
+  .transfer-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    position: relative; z-index: 1; margin-top: 4px;
+  }
+  .transfer-pct { font-size: 12px; color: var(--nk-text-2); font-variant-numeric: tabular-nums; }
+  .transfer-time { font-size: 11px; color: var(--nk-text-3); }
+  .transfer-done { background: rgba(76,175,80,0.12); color: var(--nk-green); border-color: rgba(76,175,80,0.3); }
+  .transfer-done .transfer-speed { color: var(--nk-green); }
+
+  /* ── Settings ── */
+  .settings-section { margin-bottom: 8px; }
+  .settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px;
+    background: var(--nk-surface); border: 1px solid var(--nk-border);
+    cursor: pointer;
+    transition: background var(--nk-transition);
+  }
+  .settings-row:first-child { border-radius: var(--nk-radius) var(--nk-radius) 0 0; }
+  .settings-row:last-child { border-radius: 0 0 var(--nk-radius) var(--nk-radius); }
+  .settings-row:only-child { border-radius: var(--nk-radius); }
+  .settings-row + .settings-row { border-top: none; }
+  .settings-row:hover { background: var(--nk-surface-2); }
+  .settings-row-left { display: flex; align-items: center; gap: 12px; }
+  .settings-icon {
+    width: 34px; height: 34px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .settings-icon svg { width: 18px; height: 18px; }
+  .settings-icon.yellow { background: var(--nk-yellow-glow); }
+  .settings-icon.yellow svg { fill: var(--nk-yellow); }
+  .settings-icon.blue { background: rgba(91,155,213,0.15); }
+  .settings-icon.blue svg { fill: var(--nk-blue); }
+  .settings-icon.red { background: rgba(224,58,58,0.12); }
+  .settings-icon.red svg { fill: var(--nk-red); }
+  .settings-icon.green { background: rgba(76,175,80,0.12); }
+  .settings-icon.green svg { fill: var(--nk-green); }
+  .settings-icon.gray { background: var(--nk-surface-3); }
+  .settings-icon.gray svg { fill: var(--nk-text-2); }
+  .settings-icon.orange { background: rgba(245,147,0,0.15); }
+  .settings-icon.orange svg { fill: var(--nk-orange); }
+  .settings-title { font-size: 14px; font-weight: 500; }
+  .settings-sub { font-size: 12px; color: var(--nk-text-3); margin-top: 1px; }
+  .settings-row-right { display: flex; align-items: center; gap: 8px; }
+  .settings-row-right svg { width: 14px; height: 14px; fill: var(--nk-text-3); }
+  .settings-value { font-size: 13px; color: var(--nk-text-2); }
+
+  /* ✅ 文件格式过滤器 Tag 选择 */
+  .filter-tags {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .filter-tag {
+    padding: 5px 12px; border-radius: 100px;
+    font-size: 11px; font-weight: 700;
+    border: 1px solid var(--nk-border);
+    background: var(--nk-surface-2);
+    color: var(--nk-text-3);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .filter-tag.active-nef { background: rgba(245,184,0,0.15); color: var(--nk-yellow); border-color: var(--nk-yellow); }
+  .filter-tag.active-jpg { background: rgba(91,155,213,0.15); color: var(--nk-blue); border-color: var(--nk-blue); }
+  .filter-tag.active-all { background: rgba(76,175,80,0.15); color: var(--nk-green); border-color: var(--nk-green); }
+
+  /* Toggle */
+  .toggle {
+    width: 44px; height: 24px; border-radius: 100px;
+    background: var(--nk-surface-3); position: relative;
+    flex-shrink: 0; cursor: pointer;
+    transition: background 0.2s;
+    border: 1px solid var(--nk-border);
+  }
+  .toggle.on { background: var(--nk-yellow); border-color: var(--nk-yellow); }
+  .toggle::after {
+    content: ''; position: absolute;
+    width: 18px; height: 18px; background: #fff;
+    border-radius: 50%; top: 2px; left: 2px;
+    transition: left 0.2s;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  .toggle.on::after { left: 22px; }
+
+  /* ── Scan ── */
+  .scan-container {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 28px 20px; gap: 20px;
+  }
+  .scan-ring-wrap {
+    position: relative; width: 160px; height: 160px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .scan-ring {
+    position: absolute; border-radius: 50%;
+    border: 1.5px solid rgba(245,184,0,0.15);
+    animation: ring-expand 2.5s ease-out infinite;
+  }
+  .scan-ring:nth-child(1){width:80px;height:80px;animation-delay:0s}
+  .scan-ring:nth-child(2){width:110px;height:110px;animation-delay:0.6s}
+  .scan-ring:nth-child(3){width:140px;height:140px;animation-delay:1.2s}
+  .scan-ring:nth-child(4){width:160px;height:160px;animation-delay:1.8s}
+  @keyframes ring-expand { 0%{opacity:0.8} 100%{opacity:0} }
+  /* ✅ 错误状态扫描中心 */
+  .scan-center {
+    width: 64px; height: 64px;
+    background: var(--nk-yellow-glow); border: 2px solid var(--nk-yellow);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    z-index: 2; box-shadow: var(--nk-shadow-yellow);
+  }
+  .scan-center.error {
+    background: rgba(224,58,58,0.15); border-color: var(--nk-red);
+    box-shadow: var(--nk-shadow-red);
+  }
+  .scan-center svg { width: 28px; height: 28px; fill: var(--nk-yellow); }
+  .scan-center.error svg { fill: var(--nk-red); }
+
+  /* ── Device Card ── */
+  .device-card {
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius);
+    padding: 14px 16px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+    cursor: pointer; transition: all var(--nk-transition);
+  }
+  .device-card:hover { border-color: var(--nk-border-active); background: rgba(245,184,0,0.04); }
+  .device-card.connecting { border-color: var(--nk-yellow); background: rgba(245,184,0,0.06); }
+  /* ✅ 连接错误状态 */
+  .device-card.error { border-color: rgba(224,58,58,0.5); background: rgba(224,58,58,0.06); }
+  .device-icon {
+    width: 48px; height: 48px; border-radius: 14px;
+    background: var(--nk-surface-3);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; border: 1px solid var(--nk-border);
+  }
+  .device-icon svg { width: 26px; height: 26px; fill: var(--nk-text-2); }
+  .device-info { flex: 1; min-width: 0; }
+  .device-name { font-size: 14px; font-weight: 700; }
+  .device-desc { font-size: 12px; color: var(--nk-text-2); margin-top: 3px; }
+  .device-connect {
+    padding: 8px 14px; border-radius: 10px;
+    background: var(--nk-yellow); color: #000;
+    font-size: 12px; font-weight: 700;
+    border: none; cursor: pointer; flex-shrink: 0;
+  }
+  /* ✅ 重试按钮 */
+  .device-retry {
+    padding: 8px 12px; border-radius: 10px;
+    background: rgba(224,58,58,0.15); color: var(--nk-red);
+    font-size: 12px; font-weight: 700;
+    border: 1px solid rgba(224,58,58,0.3);
+    cursor: pointer; flex-shrink: 0;
+  }
+  .connecting-spinner {
+    width: 20px; height: 20px;
+    border: 2px solid rgba(245,184,0,0.3);
+    border-top-color: var(--nk-yellow);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  /* ── Speed Gauge ── */
+  .speed-gauge {
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius);
+    padding: 16px; display: flex; align-items: center;
+    gap: 16px; margin-bottom: 12px;
+  }
+  .gauge-ring { width: 72px; height: 72px; flex-shrink: 0; position: relative; }
+  .gauge-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .gauge-text {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .gauge-num { font-size: 16px; font-weight: 800; color: var(--nk-yellow); line-height: 1; }
+  .gauge-unit { font-size: 9px; color: var(--nk-text-3); font-weight: 600; letter-spacing: 0.5px; margin-top: 2px; }
+  .gauge-info { flex: 1; }
+  .gauge-label { font-size: 12px; color: var(--nk-text-2); margin-bottom: 6px; }
+  .gauge-detail { font-size: 13px; font-weight: 700; }
+  .gauge-sub { font-size: 11px; color: var(--nk-text-3); margin-top: 3px; }
+
+  /* ── Stats ── */
+  .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .stat-card {
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    border-radius: var(--nk-radius-sm); padding: 14px 12px;
+  }
+  .stat-label { font-size: 11px; color: var(--nk-text-3); font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+  .stat-value { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+  .stat-sub { font-size: 11px; color: var(--nk-text-3); margin-top: 3px; }
+
+  /* ── Format Tags ── */
+  .format-tag {
+    display: inline-flex; padding: 2px 6px;
+    border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .format-nef { background: rgba(245,184,0,0.15); color: var(--nk-yellow); }
+  .format-jpg { background: rgba(91,155,213,0.15); color: var(--nk-blue); }
+
+  /* ── Conn Tag ── */
+  .conn-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 100px;
+    font-size: 11px; font-weight: 600;
+  }
+  .conn-usb { background: rgba(76,175,80,0.12); color: var(--nk-green); }
+  .conn-wifi { background: rgba(91,155,213,0.12); color: var(--nk-blue); }
+  .conn-ble { background: rgba(245,184,0,0.12); color: var(--nk-yellow); }
+  .conn-tag svg { width: 11px; height: 11px; fill: currentColor; }
+
+  /* ── Profile Chip ── */
+  .profile-chip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    border-radius: 100px; margin-bottom: 16px;
+  }
+  .profile-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--nk-yellow);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800; color: #000; flex-shrink: 0;
+  }
+
+  /* ── Connection Banner ── */
+  .connection-banner {
+    background: linear-gradient(135deg, #1A1600 0%, #0E0E0E 100%);
+    border: 1px solid var(--nk-border-active);
+    border-radius: var(--nk-radius);
+    padding: 16px; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 14px;
+    box-shadow: var(--nk-shadow-yellow);
+  }
+  .camera-avatar {
+    width: 56px; height: 56px; border-radius: 14px;
+    background: var(--nk-surface-2); border: 1px solid var(--nk-border);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .camera-avatar svg { width: 30px; height: 30px; fill: var(--nk-yellow); }
+  .camera-info { flex: 1; }
+  .camera-model { font-size: 16px; font-weight: 800; letter-spacing: -0.3px; }
+  .camera-detail { font-size: 12px; color: var(--nk-text-2); margin-top: 2px; }
+  .camera-stats { display: flex; gap: 12px; margin-top: 8px; }
+  .camera-stat-item { display: flex; align-items: center; gap: 4px; }
+  .camera-stat-item svg { width: 13px; height: 13px; fill: var(--nk-text-3); }
+  .camera-stat-item span { font-size: 11px; color: var(--nk-text-2); font-weight: 600; }
+
+  /* Battery */
+  .battery-bar { display: flex; align-items: center; gap: 6px; }
+  .battery-icon {
+    width: 24px; height: 12px; border: 1.5px solid currentColor;
+    border-radius: 3px; position: relative; display: flex; align-items: center;
+  }
+  .battery-icon::after {
+    content: ''; position: absolute; right: -5px;
+    width: 3px; height: 6px; background: currentColor;
+    border-radius: 0 1px 1px 0;
+  }
+  .battery-fill { height: calc(100% - 2px); border-radius: 1.5px; margin: 1px; }
+  .battery-fill.green { background: var(--nk-green); }
+  .battery-fill.yellow { background: var(--nk-yellow); }
+
+  /* Storage */
+  .storage-bar { height: 6px; background: var(--nk-surface-3); border-radius: 100px; overflow: hidden; margin: 6px 0 4px; }
+  .storage-fill { height: 100%; border-radius: 100px; background: linear-gradient(90deg, var(--nk-yellow-dim), var(--nk-yellow)); }
+
+  /* Badge */
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 20px; padding: 0 6px;
+    border-radius: 100px; font-size: 11px; font-weight: 700;
+    background: var(--nk-yellow); color: #000;
+  }
+  .badge-red { background: var(--nk-red); color: #fff; }
+
+  /* ✅ 错误提示横幅 */
+  .error-banner {
+    background: linear-gradient(135deg, #1A0400 0%, #0E0E0E 100%);
+    border: 1px solid rgba(224,58,58,0.4);
+    border-radius: var(--nk-radius);
+    padding: 12px 16px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: var(--nk-shadow-red);
+  }
+  .error-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: rgba(224,58,58,0.15);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .error-icon svg { width: 20px; height: 20px; fill: var(--nk-red); }
+  .error-info { flex: 1; }
+  .error-title { font-size: 13px; font-weight: 700; color: var(--nk-red); }
+  .error-desc { font-size: 11px; color: var(--nk-text-2); margin-top: 2px; }
+  .error-code { font-size: 10px; color: var(--nk-text-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  /* ✅ 批量操作工具栏 */
+  .batch-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(245,184,0,0.06); border: 1px solid var(--nk-border-active);
+    border-radius: var(--nk-radius-sm); margin-bottom: 10px;
+  }
+  .batch-info { font-size: 12px; color: var(--nk-text-2); }
+  .batch-info span { color: var(--nk-yellow); font-weight: 700; }
+  .batch-actions { display: flex; gap: 8px; }
+  .batch-btn {
+    padding: 6px 12px; border-radius: 8px;
+    font-size: 12px; font-weight: 700; border: none; cursor: pointer;
+  }
+  .batch-btn-cancel { background: var(--nk-red-dim); color: var(--nk-red); border: 1px solid rgba(224,58,58,0.3); }
+  .batch-btn-pause { background: var(--nk-surface-3); color: var(--nk-text-2); border: 1px solid var(--nk-border); }
+
+  /* ✅ 参数调节浮层 */
+  .param-adjuster {
+    background: rgba(0,0,0,0.88); backdrop-filter: blur(8px);
+    border: 1px solid rgba(245,184,0,0.3);
+    border-radius: 10px; padding: 8px 10px;
+    display: flex; align-items: center; gap: 8px;
+    pointer-events: all;
+  }
+  .adj-btn {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(255,255,255,0.1); border: none;
+    color: var(--nk-text); font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .adj-value { font-size: 15px; font-weight: 800; min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
+  .adj-label { font-size: 10px; color: var(--nk-text-3); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="stage-header">
+    <div class="brand-logo">
+      <div class="logo-mark">N</div>
+      <div class="logo-text">Nikon Connect <span class="v-badge">v2 · 完整版</span></div>
+    </div>
+    <p>Android App UI 设计原型 · 尼康官方配色 · 全功能覆盖</p>
+  </div>
+
+  <div class="phones-row">
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 1. 扫描 & 连接 (含错误状态 + BLE唤醒说明) -->
+    <!-- ════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">01 · 扫描 & 连接</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="status-bar">
+              <span class="status-time">09:04</span>
+              <div class="status-icons">
+                <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+              </div>
+            </div>
+            <div class="app-bar">
+              <div class="app-bar-title">扫描<span>设备</span></div>
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+              </div>
+            </div>
+
+            <div class="screen-content">
+
+              <!-- ✅ 连接失败错误横幅 -->
+              <div class="error-banner">
+                <div class="error-icon">
+                  <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                </div>
+                <div class="error-info">
+                  <div class="error-title">连接失败</div>
+                  <div class="error-desc">无法建立 USB PTP 会话</div>
+                  <div class="error-code">错误码 CAM_ERR_USB (-400) · 请检查数据线连接</div>
+                </div>
+                <button class="device-retry">重试</button>
+              </div>
+
+              <!-- 扫描动画 -->
+              <div class="scan-container">
+                <div class="scan-ring-wrap">
+                  <div class="scan-ring"></div>
+                  <div class="scan-ring"></div>
+                  <div class="scan-ring"></div>
+                  <div class="scan-ring"></div>
+                  <div class="scan-center">
+                    <svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+                  </div>
+                </div>
+                <div style="text-align:center">
+                  <div style="font-size:17px;font-weight:700;margin-bottom:5px">正在扫描...</div>
+                  <div style="font-size:12px;color:var(--nk-text-2);line-height:1.6">检测 USB / Wi-Fi / 蓝牙 尼康相机设备</div>
+                </div>
+              </div>
+
+              <!-- 连接方式切换 -->
+              <div class="section-label">连接方式</div>
+              <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <div class="btn btn-primary" style="flex:1;padding:10px 8px;font-size:12px;gap:5px;">
+                  <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:#000"><path d="M15 7.5V2H9v5.5l3 3 3-3zM7.5 9H2v6h5.5l3-3-3-3zM9 16.5V22h6v-5.5l-3-3-3 3zM16.5 9l-3 3 3 3H22V9h-5.5z"/></svg>
+                  USB
+                </div>
+                <div class="btn btn-secondary" style="flex:1;padding:10px 8px;font-size:12px;gap:5px;">
+                  <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:var(--nk-text)"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                  Wi-Fi
+                </div>
+                <div class="btn btn-secondary" style="flex:1;padding:10px 8px;font-size:12px;gap:5px;">
+                  <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:var(--nk-text)"><path d="M17.71 7.71L12 2l-5.71 5.71-1.15-1.15 6.86-6.85 6.86 6.85-1.15 1.15zm-9.14 9.37l1.15 1.14L12 21l2.29-2.78 1.14-1.14L12 20.14l-3.43-3.06z"/></svg>
+                  蓝牙
+                </div>
+              </div>
+
+              <!-- ✅ BLE 蓝牙唤醒说明 -->
+              <div class="card" style="padding:12px 14px;background:rgba(245,184,0,0.04);border-color:rgba(245,184,0,0.2);">
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:var(--nk-yellow);flex-shrink:0;margin-top:2px"><path d="M11.5 2C6.81 2 3 5.81 3 10.5S6.81 19 11.5 19h.5v3c4.86-2.34 8-7 8-11.5C20 5.81 16.19 2 11.5 2zm1 14.5h-2v-2h2v2zm0-4h-2c0-3.25 3-3 3-5 0-1.1-.9-2-2-2s-2 .9-2 2h-2c0-2.21 1.79-4 4-4s4 1.79 4 4c0 2.5-3 2.75-3 5z"/></svg>
+                  <div>
+                    <div style="font-size:12px;font-weight:700;color:var(--nk-yellow);margin-bottom:3px;">蓝牙 BLE 唤醒</div>
+                    <div style="font-size:11px;color:var(--nk-text-2);line-height:1.6">相机处于休眠时，蓝牙可唤醒相机并自动切换至 USB/Wi-Fi 连接。需在相机菜单中提前启用「通过蓝牙遥控」。</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 已发现设备 -->
+              <div class="section-label">发现的设备</div>
+
+              <div class="device-card connecting">
+                <div class="device-icon" style="border-color:rgba(245,184,0,0.3);background:rgba(245,184,0,0.06)">
+                  <svg viewBox="0 0 24 24" style="fill:var(--nk-yellow)"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+                </div>
+                <div class="device-info">
+                  <div class="device-name">NIKON Z 8</div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+                    <span class="conn-tag conn-usb"><svg viewBox="0 0 24 24"><path d="M15 7.5V2H9v5.5l3 3 3-3z"/></svg>USB</span>
+                    <span style="font-size:11px;color:var(--nk-text-3)">正在连接...</span>
+                  </div>
+                </div>
+                <div class="connecting-spinner"></div>
+              </div>
+
+              <!-- ✅ 连接错误设备卡 -->
+              <div class="device-card error">
+                <div class="device-icon" style="border-color:rgba(224,58,58,0.3);background:rgba(224,58,58,0.06)">
+                  <svg viewBox="0 0 24 24" style="fill:var(--nk-red)"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+                </div>
+                <div class="device-info">
+                  <div class="device-name">NIKON Z 6III</div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+                    <span class="conn-tag conn-wifi" style="background:rgba(224,58,58,0.12);color:var(--nk-red)"><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>连接失败</span>
+                    <span style="font-size:11px;color:var(--nk-red)">超时 · CAM_ERR_TIMEOUT</span>
+                  </div>
+                </div>
+                <button class="device-retry">重试</button>
+              </div>
+
+              <div class="btn btn-secondary" style="margin-top:4px;">
+                <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                重新扫描
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 2. 主页 (含连拍入口 + 参数实时刷新动效) -->
+    <!-- ════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">02 · 主页 / 相机状态</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="status-bar">
+              <span class="status-time">09:04</span>
+              <div class="status-icons">
+                <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+              </div>
+            </div>
+            <div class="app-bar">
+              <div class="app-bar-title">Nikon <span>Connect</span></div>
+              <div class="icon-btn">
+                <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+              </div>
+            </div>
+
+            <div class="screen-content">
+              <div class="connection-banner">
+                <div class="camera-avatar">
+                  <svg viewBox="0 0 24 24"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+                </div>
+                <div class="camera-info">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <div class="camera-model">NIKON Z 8</div>
+                    <span class="pill pill-connected"><span class="pill-dot"></span>已连接</span>
+                  </div>
+                  <div class="camera-detail">S/N: 3012XXXX · USB · PTP</div>
+                  <div class="camera-stats">
+                    <div class="camera-stat-item">
+                      <div class="battery-bar" style="color:var(--nk-green)">
+                        <div class="battery-icon"><div class="battery-fill green" style="width:85%"></div></div>
+                      </div>
+                      <span>85%</span>
+                    </div>
+                    <div class="camera-stat-item">
+                      <svg viewBox="0 0 24 24"><path d="M20 6h-2.18c.07-.44.18-.9.18-1.38C18 2.51 16.49 1 14.62 1 13.38 1 12.38 1.6 11.77 2.56L11 3.5l-.77-.94C9.62 1.6 8.62 1 7.38 1 5.51 1 4 2.51 4 4.62c0 .48.11.94.18 1.38H2c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 12H4v-2h14v2z"/></svg>
+                      <span>43.2 GB</span>
+                    </div>
+                    <div class="camera-stat-item">
+                      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>
+                      <span>12,483</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 存储 -->
+              <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                  <span style="font-size:13px;font-weight:600;">存储卡 (CF-A)</span>
+                  <span style="font-size:12px;color:var(--nk-text-2)">43.2 / 256 GB</span>
+                </div>
+                <div class="storage-bar"><div class="storage-fill" style="width:17%"></div></div>
+                <div style="font-size:11px;color:var(--nk-text-3)">剩余 212.8 GB · 约可拍摄 NEF 2,450 张</div>
+              </div>
+
+              <!-- ✅ 参数网格（带实时刷新动效点）-->
+              <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;">
+                <span>当前拍摄参数</span>
+                <span style="font-size:10px;color:var(--nk-yellow);display:flex;align-items:center;gap:4px;"><span style="width:5px;height:5px;border-radius:50%;background:var(--nk-yellow);display:inline-block;animation:dot-pulse 1.5s infinite;"></span>实时同步</span>
+              </div>
+              <div class="param-grid">
+                <div class="param-cell">
+                  <!-- ✅ 参数刷新指示点 -->
+                  <div class="param-refresh-dot"></div>
+                  <div class="param-label">快门</div>
+                  <div class="param-value">1/500</div>
+                </div>
+                <div class="param-cell refreshing">
+                  <div class="param-label">光圈</div>
+                  <div class="param-value yellow">f/2.8</div>
+                </div>
+                <div class="param-cell">
+                  <div class="param-label">ISO</div>
+                  <div class="param-value">800</div>
+                </div>
+                <div class="param-cell">
+                  <div class="param-label">EV</div>
+                  <div class="param-value">-0.3</div>
+                </div>
+                <div class="param-cell">
+                  <div class="param-label">对焦</div>
+                  <div class="param-value" style="font-size:14px">AF-C</div>
+                </div>
+                <div class="param-cell">
+                  <div class="param-label">模式</div>
+                  <div class="param-value yellow" style="font-size:14px">A</div>
+                </div>
+              </div>
+
+              <!-- 快速操作（含连拍）-->
+              <div class="section-label">快速操作</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+                <div class="btn btn-primary" style="padding:12px;font-size:12px;flex-direction:column;gap:5px;height:auto;">
+                  <svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:#000"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>
+                  立即拍摄
+                </div>
+                <!-- ✅ 连拍入口 -->
+                <div class="btn btn-ghost" style="padding:12px;font-size:12px;flex-direction:column;gap:5px;height:auto;">
+                  <svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:var(--nk-yellow)"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.65 0-3 1.35-3 3s1.35 3 3 3 3-1.35 3-3-1.35-3-3-3z"/></svg>
+                  连拍模式
+                </div>
+                <div class="btn btn-secondary" style="padding:12px;font-size:12px;flex-direction:column;gap:5px;height:auto;">
+                  <svg viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zm-8-1h2v-3h3v-2h-3V7h-2v3H7v2h3z"/></svg>
+                  实时取景
+                </div>
+                <div class="btn btn-secondary" style="padding:12px;font-size:12px;flex-direction:column;gap:5px;height:auto;">
+                  <svg viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                  传输全部
+                </div>
+              </div>
+
+              <!-- 边拍边传 -->
+              <div class="row-item active-row">
+                <div class="row-icon yellow">
+                  <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+                </div>
+                <div class="row-info">
+                  <div class="row-title">自动传输已开启</div>
+                  <div class="row-subtitle">新文件 → 自动导出到 /DCIM/NikonConnect</div>
+                </div>
+                <div class="row-end"><div class="toggle on"></div></div>
+              </div>
+
+            </div>
+
+            <div class="bottom-nav">
+              <div class="nav-item active"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>主页</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg><span>相册</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>传输</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M2.53 19.65l1.34.56v-9.03l-2.43 5.86c-.41 1.02.08 2.19 1.09 2.61zm19.5-3.7L17.07 3.98c-.31-.75-1.18-1.12-1.93-.81l-5.64 2.34c-.75.31-1.12 1.18-.81 1.93l4.96 11.97c.31.75 1.18 1.12 1.93.81l5.64-2.34c.75-.31 1.12-1.18.81-1.93zM7.88 10.83c0-1.22-.99-2.21-2.21-2.21S3.46 9.61 3.46 10.83c0 1.22.99 2.21 2.21 2.21s2.21-.99 2.21-2.21z"/></svg><span>预设</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.06 7.06 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.47.47 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg><span>设置</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 3. 实时取景 (含退出LV + AF模式 + 参数调节 + 变焦 + 连拍) -->
+    <!-- ════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">03 · 实时取景</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen" style="background:#000;">
+
+            <!-- ✅ 退出 LV 按钮 + 状态栏 -->
+            <div style="position:absolute;top:0;left:0;right:0;z-index:20;padding:14px 18px 0;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to bottom,rgba(0,0,0,0.75),transparent);">
+              <span class="status-time">09:04</span>
+              <!-- ✅ 退出 LV 按钮 -->
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);border-radius:8px;padding:5px 10px;cursor:pointer;border:1px solid rgba(255,255,255,0.12);">
+                  <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-text)"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                  <span style="font-size:11px;font-weight:700;">退出 LV</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:var(--nk-text)"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- 全屏取景器背景 -->
+            <div style="position:absolute;inset:0;background:linear-gradient(135deg, #1a2332 0%, #0d1a2a 30%, #1a1500 70%, #0a0a0a 100%);">
+              <div style="position:absolute;inset:0;opacity:0.4">
+                <div style="position:absolute;bottom:30%;left:10%;right:50%;top:20%;background:linear-gradient(135deg,rgba(100,150,200,0.2),transparent);border-radius:20%;"></div>
+                <div style="position:absolute;bottom:0;left:0;right:0;height:35%;background:linear-gradient(to top,rgba(30,20,10,0.8),transparent);"></div>
+              </div>
+
+              <div class="liveview-overlay">
+                <div class="grid-lines"></div>
+                <div class="af-box"></div>
+
+                <!-- REC 指示 -->
+                <div class="rec-indicator"><div class="rec-dot"></div>LV</div>
+
+                <!-- 直方图 -->
+                <div class="histogram">
+                  <div class="hist-bar" style="height:20%"></div><div class="hist-bar" style="height:35%"></div>
+                  <div class="hist-bar" style="height:60%"></div><div class="hist-bar" style="height:90%"></div>
+                  <div class="hist-bar" style="height:80%"></div><div class="hist-bar" style="height:65%"></div>
+                  <div class="hist-bar" style="height:45%"></div><div class="hist-bar" style="height:25%"></div>
+                  <div class="hist-bar" style="height:15%"></div>
+                </div>
+
+                <!-- ✅ AF 模式切换 -->
+                <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);">
+                  <div class="af-mode-group">
+                    <div class="af-btn">MF</div>
+                    <div class="af-btn active">AF-C</div>
+                    <div class="af-btn">AF-S</div>
+                  </div>
+                </div>
+
+                <!-- ✅ 参数点击调节浮层（光圈被激活） -->
+                <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);margin-top:60px;">
+                  <div class="param-adjuster">
+                    <div class="adj-btn">−</div>
+                    <div>
+                      <div class="adj-label">光圈</div>
+                      <div class="adj-value">f/2.8</div>
+                    </div>
+                    <div class="adj-btn">＋</div>
+                  </div>
+                </div>
+
+                <!-- HUD 参数（可点击）-->
+                <div class="hud-params">
+                  <div class="hud-tag">1/500</div>
+                  <div class="hud-tag active-param">f/2.8 ▾</div>
+                  <div class="hud-tag">ISO 800</div>
+                  <div class="hud-tag">-0.3EV</div>
+                </div>
+
+                <!-- ✅ 变焦控制 -->
+                <div style="position:absolute;right:10px;top:50%;transform:translateY(-50%);">
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                    <div class="zoom-btn">＋</div>
+                    <div class="zoom-label">1.0×</div>
+                    <div class="zoom-btn">－</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 底部控制区 -->
+            <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,0.95) 60%,transparent);padding:12px 18px 18px;z-index:20;">
+              <!-- 参数展示行 -->
+              <div style="display:flex;gap:12px;margin-bottom:12px;">
+                <div style="flex:1;text-align:center;">
+                  <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;letter-spacing:1px;margin-bottom:3px;">快门</div>
+                  <div style="font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;">1/500</div>
+                </div>
+                <div style="flex:1;text-align:center;">
+                  <div style="font-size:10px;color:var(--nk-yellow);font-weight:700;letter-spacing:1px;margin-bottom:3px;">光圈 ▸</div>
+                  <div style="font-size:15px;font-weight:800;color:var(--nk-yellow);">f/2.8</div>
+                </div>
+                <div style="flex:1;text-align:center;">
+                  <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;letter-spacing:1px;margin-bottom:3px;">ISO</div>
+                  <div style="font-size:15px;font-weight:800;">800</div>
+                </div>
+                <div style="flex:1;text-align:center;">
+                  <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;letter-spacing:1px;margin-bottom:3px;">EV</div>
+                  <div style="font-size:15px;font-weight:800;">-0.3</div>
+                </div>
+              </div>
+
+              <!-- ✅ 快门行（含连拍按钮）-->
+              <div class="shutter-row">
+                <!-- 连拍控制 -->
+                <div class="ctrl-btn active-ctrl" title="连拍模式">
+                  <svg viewBox="0 0 24 24"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <!-- 连拍计数标识 -->
+                  <div style="background:rgba(245,184,0,0.15);border:1px solid var(--nk-yellow);border-radius:8px;padding:4px 8px;text-align:center;">
+                    <div style="font-size:9px;color:var(--nk-yellow);font-weight:700;letter-spacing:0.5px;">连拍</div>
+                    <div style="font-size:13px;font-weight:800;color:var(--nk-yellow);line-height:1.1">×5</div>
+                  </div>
+                  <div class="shutter-btn"><div class="shutter-inner"></div></div>
+                </div>
+                <!-- 相机图库按钮 -->
+                <div class="ctrl-btn" title="相册">
+                  <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zm-5-1h2v-4h3v-2h-3V7h-2v3H9v2h3z"/></svg>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 4. 文件传输 (含失败状态+重试 + 批量取消 + 格式过滤) -->
+    <!-- ════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">04 · 文件传输</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="status-bar">
+              <span class="status-time">09:04</span>
+              <div class="status-icons">
+                <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+              </div>
+            </div>
+            <div class="app-bar">
+              <div class="app-bar-title">文件<span>传输</span></div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="badge badge-red">1</span>
+                <span class="badge">3</span>
+                <div class="icon-btn">
+                  <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="screen-content">
+              <!-- 速度仪表 -->
+              <div class="speed-gauge">
+                <div class="gauge-ring">
+                  <svg viewBox="0 0 72 72">
+                    <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/>
+                    <circle cx="36" cy="36" r="28" fill="none" stroke="url(#gaugeGrad)" stroke-width="6" stroke-dasharray="126 176" stroke-linecap="round"/>
+                    <defs><linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#C49300"/><stop offset="100%" stop-color="#F5B800"/></linearGradient></defs>
+                  </svg>
+                  <div class="gauge-text">
+                    <div class="gauge-num">34.2</div>
+                    <div class="gauge-unit">MB/s</div>
+                  </div>
+                </div>
+                <div class="gauge-info">
+                  <div class="gauge-label">当前传输速度</div>
+                  <div class="gauge-detail">3 个任务进行中</div>
+                  <div class="gauge-sub">已传输 1.2 GB · 剩余 2m 18s</div>
+                </div>
+              </div>
+
+              <!-- ✅ 格式过滤器 -->
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--nk-text-3);">格式过滤</div>
+                <div class="filter-tags">
+                  <div class="filter-tag active-all">全部</div>
+                  <div class="filter-tag active-nef">NEF</div>
+                  <div class="filter-tag">JPG</div>
+                  <div class="filter-tag">NEF+JPG</div>
+                </div>
+              </div>
+
+              <!-- 统计 -->
+              <div class="stats-row">
+                <div class="stat-card">
+                  <div class="stat-label">今日传输</div>
+                  <div class="stat-value" style="color:var(--nk-yellow)">156</div>
+                  <div class="stat-sub">张 · 8.3 GB</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">成功率</div>
+                  <div class="stat-value" style="color:var(--nk-green)">99.3%</div>
+                  <div class="stat-sub">断点续传覆盖</div>
+                </div>
+              </div>
+
+              <!-- ✅ 批量操作工具栏 -->
+              <div class="batch-toolbar">
+                <div class="batch-info">已选 <span>3</span> 个任务</div>
+                <div class="batch-actions">
+                  <div class="batch-btn batch-btn-pause">全部暂停</div>
+                  <div class="batch-btn batch-btn-cancel">全部取消</div>
+                </div>
+              </div>
+
+              <!-- 传输中 -->
+              <div class="section-label">传输中</div>
+
+              <div class="transfer-item active-transfer">
+                <div class="transfer-progress-bg" style="width:72%"></div>
+                <div class="transfer-header">
+                  <div class="transfer-file-info">
+                    <div class="file-thumb" style="background:linear-gradient(135deg,#1a3a5c,#0a1a2a)"></div>
+                    <div>
+                      <div class="file-name">DSC_0847.NEF <span class="format-tag format-nef">NEF</span></div>
+                      <div class="file-meta">45.3 MB · 09:03:42</div>
+                    </div>
+                  </div>
+                  <div class="transfer-speed">34.2 MB/s</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill progress-fill-anim" style="width:72%"></div></div>
+                <div class="transfer-footer">
+                  <div class="transfer-pct">72% · 32.6 / 45.3 MB</div>
+                  <div class="transfer-time">剩余 ~0:23</div>
+                </div>
+              </div>
+
+              <!-- ✅ 传输失败卡片 + 重试按钮 -->
+              <div class="section-label" style="color:var(--nk-red)">传输失败 <span style="font-size:10px;color:var(--nk-text-3)">(1)</span></div>
+
+              <div class="transfer-item failed">
+                <div class="transfer-header">
+                  <div class="transfer-file-info">
+                    <div class="file-thumb" style="background:rgba(224,58,58,0.15);border-color:rgba(224,58,58,0.3);">
+                      <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:var(--nk-red);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                    </div>
+                    <div>
+                      <div class="file-name">DSC_0848.NEF <span class="format-tag format-nef">NEF</span></div>
+                      <div class="file-meta" style="color:var(--nk-red)">连接中断 · CAM_ERR_TRANSFER_FAILED (-200)</div>
+                    </div>
+                  </div>
+                  <div style="font-size:12px;font-weight:700;color:var(--nk-red)">失败</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill progress-fill-red" style="width:38%"></div></div>
+                <div class="transfer-footer">
+                  <div class="transfer-pct" style="color:var(--nk-red)">38% · 已传 17.9 MB</div>
+                  <!-- ✅ 重试按钮 -->
+                  <div style="display:flex;gap:6px;">
+                    <button class="device-retry" style="padding:5px 10px;font-size:11px;border-radius:8px;">断点续传</button>
+                    <button class="device-connect" style="padding:5px 10px;font-size:11px;border-radius:8px;">重新传输</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 等待中 -->
+              <div class="section-label">等待中</div>
+              <div class="transfer-item">
+                <div class="transfer-header">
+                  <div class="transfer-file-info">
+                    <div class="file-thumb" style="background:linear-gradient(135deg,#2a1a0a,#1a1000)"></div>
+                    <div>
+                      <div class="file-name">DSC_0849.JPG <span class="format-tag format-jpg">JPG</span></div>
+                      <div class="file-meta">8.1 MB · 09:04:02</div>
+                    </div>
+                  </div>
+                  <div style="font-size:12px;color:var(--nk-text-3)">排队中</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+                <div class="transfer-footer"><div class="transfer-pct">0%</div><div class="transfer-time">等待前置任务</div></div>
+              </div>
+
+              <!-- 已完成 -->
+              <div class="section-label">已完成</div>
+              <div class="transfer-item transfer-done">
+                <div class="transfer-header">
+                  <div class="transfer-file-info">
+                    <div class="file-thumb" style="background:linear-gradient(135deg,#0a2a1a,#051510)"></div>
+                    <div>
+                      <div class="file-name">DSC_0846.NEF <span class="format-tag format-nef">NEF</span></div>
+                      <div class="file-meta">43.8 MB · 耗时 1.3s</div>
+                    </div>
+                  </div>
+                  <div class="transfer-speed">✓ 完成</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" style="width:100%;background:var(--nk-green)"></div></div>
+                <div class="transfer-footer">
+                  <div class="transfer-pct">100%</div>
+                  <div class="transfer-time">均速 33.7 MB/s</div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="bottom-nav">
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>主页</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg><span>相册</span></div>
+              <div class="nav-item active"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>传输</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M2.53 19.65l1.34.56v-9.03l-2.43 5.86c-.41 1.02.08 2.19 1.09 2.61zm19.5-3.7L17.07 3.98c-.31-.75-1.18-1.12-1.93-.81l-5.64 2.34c-.75.31-1.12 1.18-.81 1.93l4.96 11.97c.31.75 1.18 1.12 1.93.81l5.64-2.34c.75-.31 1.12-1.18.81-1.93zM7.88 10.83c0-1.22-.99-2.21-2.21-2.21S3.46 9.61 3.46 10.83c0 1.22.99 2.21 2.21 2.21s2.21-.99 2.21-2.21z"/></svg><span>预设</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.06 7.06 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.47.47 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg><span>设置</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 5. 设置 (含格式过滤 + 通知设置 + 高级传输策略) -->
+    <!-- ════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">05 · 设置</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="status-bar">
+              <span class="status-time">09:04</span>
+              <div class="status-icons">
+                <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+              </div>
+            </div>
+            <div class="app-bar">
+              <div class="app-bar-title">设<span>置</span></div>
+            </div>
+
+            <div class="screen-content">
+
+              <div class="profile-chip">
+                <div class="profile-avatar">N</div>
+                <div>
+                  <div style="font-size:14px;font-weight:600;">Nikon Z 8 · 已连接</div>
+                  <div style="font-size:11px;color:var(--nk-text-3)">S/N: 3012XXXX · USB 3.2 Gen2</div>
+                </div>
+                <div style="margin-left:auto">
+                  <span class="pill pill-connected"><span class="pill-dot"></span>在线</span>
+                </div>
+              </div>
+
+              <!-- 传输设置 -->
+              <div class="section-label">传输设置</div>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-icon yellow"><svg viewBox="0 0 24 24"><path d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6-4.72 7.72L13 17v5h5l-1.22-1.22C19.91 19.07 22 15.76 22 12c0-5.18-3.95-9.45-9-9.95zM11 2.05C5.95 2.55 2 6.82 2 12c0 3.76 2.09 7.07 5.22 8.78L6 22h5V2.05z"/></svg></div>
+                    <div><div class="settings-title">边拍边传</div><div class="settings-sub">新文件自动传输</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon blue"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z"/></svg></div>
+                    <div><div class="settings-title">存储目标</div><div class="settings-sub">/DCIM/NikonConnect</div></div>
+                  </div>
+                  <div class="settings-row-right">
+                    <span class="settings-value">更改</span>
+                    <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                  </div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon green"><svg viewBox="0 0 24 24"><path d="M20.94 11c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></div>
+                    <div><div class="settings-title">断点续传</div><div class="settings-sub">中断后自动恢复</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon gray"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg></div>
+                    <div><div class="settings-title">并发传输数</div><div class="settings-sub">最大同时任务数</div></div>
+                  </div>
+                  <div class="settings-row-right"><span class="settings-value">3</span><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                </div>
+              </div>
+
+              <!-- ✅ 文件格式过滤 -->
+              <div class="section-label">文件格式过滤</div>
+              <div class="card" style="padding:14px;">
+                <div style="font-size:12px;color:var(--nk-text-2);margin-bottom:10px;">选择需要传输的文件格式</div>
+                <div class="filter-tags">
+                  <div class="filter-tag active-all">全部格式</div>
+                  <div class="filter-tag active-nef">仅 NEF</div>
+                  <div class="filter-tag">仅 JPG</div>
+                  <div class="filter-tag">NEF+JPG</div>
+                </div>
+                <div style="font-size:11px;color:var(--nk-text-3);margin-top:10px;">当前：传输全部格式</div>
+              </div>
+
+              <!-- ✅ 高级传输策略 -->
+              <div class="section-label">高级传输策略</div>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-icon orange"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/></svg></div>
+                    <div><div class="settings-title">传输块大小</div><div class="settings-sub">当前：自动 (1MB~4MB)</div></div>
+                  </div>
+                  <div class="settings-row-right"><span class="settings-value">自动</span><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon orange"><svg viewBox="0 0 24 24"><path d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6-4.72 7.72L13 17v5h5l-1.22-1.22C19.91 19.07 22 15.76 22 12c0-5.18-3.95-9.45-9-9.95z"/></svg></div>
+                    <div><div class="settings-title">速度自适应</div><div class="settings-sub">根据传输速度调整块大小</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon gray"><svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg></div>
+                    <div><div class="settings-title">小文件优先</div><div class="settings-sub">&lt; 4MB 文件优先传输 (JPG)</div></div>
+                  </div>
+                  <div class="toggle"></div>
+                </div>
+              </div>
+
+              <!-- FTP 设置 -->
+              <div class="section-label">FTP 自动导出</div>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-icon blue"><svg viewBox="0 0 24 24"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4z"/></svg></div>
+                    <div><div class="settings-title">FTP 服务器</div><div class="settings-sub">ftp.example.com:21</div></div>
+                  </div>
+                  <div class="settings-row-right"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon green"><svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4c1.4 0 2.8.5 3.86 1.43l-9.43 9.43A5.96 5.96 0 016 12c0-3.31 2.69-6 6-6zm0 12c-1.4 0-2.8-.5-3.86-1.43l9.43-9.43A5.96 5.96 0 0118 12c0 3.31-2.69 6-6 6z"/></svg></div>
+                    <div><div class="settings-title">FTPS 加密</div><div class="settings-sub">TLS 加密传输</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon yellow"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></div>
+                    <div><div class="settings-title">自动上传</div><div class="settings-sub">传输完成后上传至 FTP</div></div>
+                  </div>
+                  <div class="toggle"></div>
+                </div>
+              </div>
+
+              <!-- 连接偏好 -->
+              <div class="section-label">连接偏好</div>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-icon green"><svg viewBox="0 0 24 24"><path d="M15 7.5V2H9v5.5l3 3 3-3zM7.5 9H2v6h5.5l3-3-3-3zM9 16.5V22h6v-5.5l-3-3-3 3zM16.5 9l-3 3 3 3H22V9h-5.5z"/></svg></div>
+                    <div><div class="settings-title">优先 USB 连接</div><div class="settings-sub">USB 可用时自动切换</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon blue"><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></div>
+                    <div><div class="settings-title">Wi-Fi 轮询间隔</div><div class="settings-sub">无线模式检测频率</div></div>
+                  </div>
+                  <div class="settings-row-right"><span class="settings-value">1000ms</span><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                </div>
+              </div>
+
+              <!-- ✅ 通知设置 -->
+              <div class="section-label">通知设置</div>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-icon yellow"><svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg></div>
+                    <div><div class="settings-title">传输完成通知</div><div class="settings-sub">批量传输完成后推送</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon red"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg></div>
+                    <div><div class="settings-title">传输失败通知</div><div class="settings-sub">失败时立即推送报警</div></div>
+                  </div>
+                  <div class="toggle on"></div>
+                </div>
+                <div class="settings-row" style="border-top:1px solid var(--nk-border)">
+                  <div class="settings-row-left">
+                    <div class="settings-icon gray"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg></div>
+                    <div><div class="settings-title">通知权限</div><div class="settings-sub">系统通知已授权</div></div>
+                  </div>
+                  <div class="settings-row-right"><span class="settings-value" style="color:var(--nk-green)">已允许</span><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                </div>
+              </div>
+
+              <!-- 危险操作 -->
+              <div class="section-label">设备</div>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-icon red"><svg viewBox="0 0 24 24"><path d="M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H7V5h10v14zm-5-1c.83 0 1.5-.67 1.5-1.5S12.83 15 12 15s-1.5.67-1.5 1.5S11.17 18 12 18z"/></svg></div>
+                    <div><div class="settings-title" style="color:var(--nk-red)">断开连接</div><div class="settings-sub">终止当前相机会话</div></div>
+                  </div>
+                  <div class="settings-row-right"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                </div>
+              </div>
+
+              <div style="text-align:center;padding:16px 0 8px;">
+                <div style="font-size:11px;color:var(--nk-text-3)">Nikon Camera Connect v2.0.0</div>
+                <div style="font-size:10px;color:var(--nk-text-3);margin-top:3px;">© 2026 · 基于 PTP/MTP 协议 · 全功能版</div>
+              </div>
+
+            </div>
+
+            <div class="bottom-nav">
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>主页</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg><span>相册</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>传输</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M2.53 19.65l1.34.56v-9.03l-2.43 5.86c-.41 1.02.08 2.19 1.09 2.61zm19.5-3.7L17.07 3.98c-.31-.75-1.18-1.12-1.93-.81l-5.64 2.34c-.75.31-1.12 1.18-.81 1.93l4.96 11.97c.31.75 1.18 1.12 1.93.81l5.64-2.34c.75-.31 1.12-1.18.81-1.93zM7.88 10.83c0-1.22-.99-2.21-2.21-2.21S3.46 9.61 3.46 10.83c0 1.22.99 2.21 2.21 2.21s2.21-.99 2.21-2.21z"/></svg><span>预设</span></div>
+              <div class="nav-item active"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.06 7.06 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.47.47 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg><span>设置</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /phones-row -->
+
+  <!-- 设计规范说明 -->
+  <div style="margin-top:60px;max-width:960px;width:100%;padding:0 24px;">
+    <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:32px;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.2);margin-bottom:20px;">设计规范 · v2 全功能版</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:8px;">颜色系统</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:20px;height:20px;border-radius:4px;background:#F5B800;flex-shrink:0;"></div><span style="font-size:12px;color:rgba(255,255,255,0.5)">Nikon Yellow #F5B800</span></div>
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:20px;height:20px;border-radius:4px;background:#E03A3A;flex-shrink:0;"></div><span style="font-size:12px;color:rgba(255,255,255,0.5)">Error Red #E03A3A</span></div>
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:20px;height:20px;border-radius:4px;background:#4CAF50;flex-shrink:0;"></div><span style="font-size:12px;color:rgba(255,255,255,0.5)">Success Green #4CAF50</span></div>
+            <div style="display:flex;align-items:center;gap:8px;"><div style="width:20px;height:20px;border-radius:4px;background:#F59300;flex-shrink:0;"></div><span style="font-size:12px;color:rgba(255,255,255,0.5)">Warning Orange #F59300</span></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:8px;">v2 新增 13 项功能</div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 连接失败/错误状态 UI</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 传输失败+断点续传+重试</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 退出 LV 按钮</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 连拍入口 (主页+取景页)</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 参数点击调节浮层</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ AF模式切换 (MF/AF-C/AF-S)</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 批量取消/暂停传输</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 文件格式过滤器 (传输页+设置页)</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ BLE 蓝牙唤醒说明文案</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 参数实时刷新动效</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 变焦控制 (+/−)</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 传输块策略高级设置</div>
+            <div style="font-size:12px;color:rgba(76,175,80,0.9)">✓ 通知设置开关 (完成/失败/权限)</div>
+            <div style="font-size:12px;color:rgba(245,184,0,0.9)">✓ 相册界面 (06 新增)</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:8px;">交互特性</div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">扫描脉冲环动画</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">参数格 Flash 刷新动效</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">传输进度 Shimmer 条</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">REC 心跳脉冲</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">HUD 参数点击展开调节器</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">AF 三段按钮组切换</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.4)">变焦 +/− 圆形控制器</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 6. 相册 / 浏览文件 (camera_api_list_files) -->
+    <!-- ════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">06 · 相册 / 浏览文件</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen" style="background:var(--nk-black);">
+
+            <!-- 状态栏 -->
+            <div class="status-bar">
+              <span class="status-time">09:04</span>
+              <div class="status-icons">
+                <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4 2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+              </div>
+            </div>
+
+            <div class="screen-content" style="padding-bottom:64px;">
+
+              <!-- ── 顶部 AppBar ── -->
+              <div style="padding:12px 18px 8px;display:flex;align-items:center;gap:10px;">
+                <div style="flex:1;">
+                  <div style="font-size:18px;font-weight:800;letter-spacing:-0.5px;">相册</div>
+                  <div style="font-size:11px;color:var(--nk-text-3);margin-top:1px;">CF-A · 347 张照片</div>
+                </div>
+                <!-- 存储卡切换 -->
+                <div style="display:flex;gap:6px;">
+                  <div style="padding:5px 10px;background:var(--nk-yellow);border-radius:8px;font-size:10px;font-weight:800;color:#000;cursor:pointer;">CF-A</div>
+                  <div style="padding:5px 10px;background:var(--nk-surface-3);border-radius:8px;font-size:10px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">SD-B</div>
+                </div>
+                <!-- 视图切换图标 -->
+                <div style="display:flex;gap:4px;">
+                  <!-- 网格 (激活) -->
+                  <div style="width:28px;height:28px;border-radius:7px;background:var(--nk-yellow);display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:#000"><path d="M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z"/></svg>
+                  </div>
+                  <!-- 列表 -->
+                  <div style="width:28px;height:28px;border-radius:7px;background:var(--nk-surface-3);display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-text-2)"><path d="M3 5h2v2H3V5zm0 4h2v2H3V9zm0 4h2v2H3v-2zm4-8h14v2H7V5zm0 4h14v2H7V9zm0 4h14v2H7v-2z"/></svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ── 过滤器 ── -->
+              <div style="padding:0 18px 12px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;">
+                <div style="flex-shrink:0;padding:5px 12px;background:var(--nk-yellow);border-radius:100px;font-size:11px;font-weight:800;color:#000;cursor:pointer;">全部</div>
+                <div style="flex-shrink:0;padding:5px 12px;background:var(--nk-surface-3);border-radius:100px;font-size:11px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">RAW (NEF)</div>
+                <div style="flex-shrink:0;padding:5px 12px;background:var(--nk-surface-3);border-radius:100px;font-size:11px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">JPEG</div>
+                <div style="flex-shrink:0;padding:5px 12px;background:var(--nk-surface-3);border-radius:100px;font-size:11px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">★ 已传</div>
+                <div style="flex-shrink:0;padding:5px 12px;background:var(--nk-surface-3);border-radius:100px;font-size:11px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">未传</div>
+              </div>
+
+              <!-- ── 多选工具栏（激活状态）── -->
+              <div style="margin:0 18px 12px;background:rgba(245,184,0,0.12);border:1px solid rgba(245,184,0,0.35);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;">
+                <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:var(--nk-yellow);flex-shrink:0"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c0-1.1.9-2 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                <span style="flex:1;font-size:12px;font-weight:700;color:var(--nk-yellow);">已选 3 张</span>
+                <!-- 批量传输 -->
+                <div style="padding:5px 10px;background:var(--nk-yellow);border-radius:8px;font-size:11px;font-weight:800;color:#000;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                  <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:#000"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                  传输
+                </div>
+                <!-- 批量删除 -->
+                <div style="padding:5px 8px;background:var(--nk-red-dim);border:1px solid rgba(224,58,58,0.3);border-radius:8px;cursor:pointer;">
+                  <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-red)"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                </div>
+                <!-- 取消选择 -->
+                <div style="padding:5px 8px;background:var(--nk-surface-3);border-radius:8px;cursor:pointer;">
+                  <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-text-2)"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </div>
+              </div>
+
+              <!-- ── 日期组 1: 今天 ── -->
+              <div class="section-label" style="padding:0 18px 8px;display:flex;align-items:center;justify-content:space-between;">
+                <span>今天 · 2026/06/23</span>
+                <span style="font-size:10px;color:var(--nk-text-3)">18 张</span>
+              </div>
+
+              <!-- 缩略图网格 (3列) -->
+              <div style="padding:0 18px;display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-bottom:12px;">
+
+                <!-- 照片 1 (选中状态) -->
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#1a3a5c,#0d1f33);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:rgba(255,255,255,0.15)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  </div>
+                  <!-- RAW 标签 -->
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:var(--nk-yellow)">NEF</div>
+                  <!-- 选中角标 -->
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--nk-yellow);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:11px;height:11px;fill:#000"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  </div>
+                  <!-- 未传输指示点 -->
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-orange);border:1px solid rgba(0,0,0,0.5)"></div>
+                </div>
+
+                <!-- 照片 2 (普通) -->
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#2a1a0d,#1a1500);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:rgba(255,255,255,0.15)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  </div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:var(--nk-yellow)">NEF</div>
+                  <!-- 已传输指示点 (绿色) -->
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-green);border:1px solid rgba(0,0,0,0.5)"></div>
+                  <!-- 选中勾 (空) -->
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);"></div>
+                </div>
+
+                <!-- 照片 3 (选中) -->
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#0d2a1a,#0a1a12);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:rgba(255,255,255,0.15)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  </div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:#A0A0A0">JPG</div>
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-green);border:1px solid rgba(0,0,0,0.5)"></div>
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--nk-yellow);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:11px;height:11px;fill:#000"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  </div>
+                </div>
+
+                <!-- 照片 4 -->
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#1a1a2a,#0d0d1a);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:rgba(255,255,255,0.15)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  </div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:var(--nk-yellow)">NEF</div>
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-orange);border:1px solid rgba(0,0,0,0.5)"></div>
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);"></div>
+                </div>
+
+                <!-- 照片 5 (选中) -->
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#2a1a0a,#1a0d00);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:rgba(255,255,255,0.15)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  </div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:var(--nk-yellow)">NEF</div>
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-green);"></div>
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--nk-yellow);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:11px;height:11px;fill:#000"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  </div>
+                </div>
+
+                <!-- 照片 6 -->
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#1a2a1a,#0d1a0d);display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:rgba(255,255,255,0.15)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  </div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:#A0A0A0">JPG</div>
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-green);"></div>
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);"></div>
+                </div>
+
+              </div><!-- /grid -->
+
+              <!-- ── 日期组 2: 昨天 ── -->
+              <div class="section-label" style="padding:0 18px 8px;display:flex;align-items:center;justify-content:space-between;">
+                <span>昨天 · 2026/06/22</span>
+                <span style="font-size:10px;color:var(--nk-text-3)">42 张</span>
+              </div>
+
+              <!-- 昨天的网格 (仅显示3张 + "更多"占位) -->
+              <div style="padding:0 18px;display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-bottom:16px;">
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#2a2a1a,#1a1a0d)"></div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:var(--nk-yellow)">NEF</div>
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-green);"></div>
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);"></div>
+                </div>
+                <div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;">
+                  <div style="width:100%;height:100%;background:linear-gradient(135deg,#1a2a2a,#0d1a1a)"></div>
+                  <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.75);padding:1px 5px;border-radius:4px;font-size:9px;font-weight:800;color:#A0A0A0">JPG</div>
+                  <div style="position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%;background:var(--nk-green);"></div>
+                  <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);"></div>
+                </div>
+                <!-- +39 更多 -->
+                <div style="aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;background:var(--nk-surface-3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:1px dashed rgba(255,255,255,0.1);">
+                  <div style="font-size:16px;font-weight:900;color:var(--nk-yellow)">+39</div>
+                  <div style="font-size:9px;color:var(--nk-text-3);font-weight:700;">更多</div>
+                </div>
+              </div>
+
+              <!-- ── 图片详情预览浮层（单张点击触发）── -->
+              <div style="margin:0 18px 16px;background:var(--nk-surface-2);border-radius:16px;border:1px solid var(--nk-border);overflow:hidden;">
+                <!-- 预览标题 -->
+                <div style="padding:10px 14px;background:var(--nk-surface-3);display:flex;align-items:center;gap:8px;">
+                  <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-yellow)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  <span style="font-size:12px;font-weight:800;">文件详情</span>
+                  <div style="flex:1;"></div>
+                  <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-text-3);cursor:pointer"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </div>
+                <!-- 预览大图 -->
+                <div style="width:100%;height:120px;background:linear-gradient(135deg,#1a3a5c,#0d1f33);display:flex;align-items:center;justify-content:center;position:relative;">
+                  <svg viewBox="0 0 24 24" style="width:48px;height:48px;fill:rgba(255,255,255,0.12)"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                  <!-- RAW badge -->
+                  <div style="position:absolute;top:8px;right:8px;background:var(--nk-yellow);padding:3px 8px;border-radius:6px;font-size:10px;font-weight:900;color:#000;">NEF</div>
+                  <!-- 未传输 badge -->
+                  <div style="position:absolute;top:8px;left:8px;background:rgba(245,147,0,0.9);padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700;color:#fff;">未传输</div>
+                </div>
+                <!-- 元信息 -->
+                <div style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">文件名</div>
+                    <div style="font-size:11px;font-weight:700;">DSC_0342.NEF</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">文件大小</div>
+                    <div style="font-size:11px;font-weight:700;">34.2 MB</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">分辨率</div>
+                    <div style="font-size:11px;font-weight:700;">8256 × 5504</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">拍摄时间</div>
+                    <div style="font-size:11px;font-weight:700;">09:04:32</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">快门速度</div>
+                    <div style="font-size:11px;font-weight:700;">1/500s</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">光圈</div>
+                    <div style="font-size:11px;font-weight:700;">f/2.8</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">ISO</div>
+                    <div style="font-size:11px;font-weight:700;">ISO 800</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:var(--nk-text-3);font-weight:700;margin-bottom:2px;">Object Handle</div>
+                    <div style="font-size:11px;font-weight:700;color:var(--nk-text-3);">0x00000156</div>
+                  </div>
+                </div>
+                <!-- 操作按钮 -->
+                <div style="padding:0 14px 14px;display:flex;gap:8px;">
+                  <div style="flex:1;padding:10px;background:var(--nk-yellow);border-radius:10px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:#000"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                    <span style="font-size:12px;font-weight:800;color:#000;">传输到手机</span>
+                  </div>
+                  <div style="padding:10px 12px;background:var(--nk-blue);opacity:0.85;border-radius:10px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:#fff"><path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/></svg>
+                    <span style="font-size:12px;font-weight:800;color:#fff;">FTP</span>
+                  </div>
+                  <div style="padding:10px 12px;background:var(--nk-red-dim);border:1px solid rgba(224,58,58,0.3);border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+                    <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--nk-red)"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                  </div>
+                </div>
+              </div><!-- /详情卡片 -->
+
+              <!-- ── 底部统计栏 ── -->
+              <div style="margin:0 18px 8px;padding:10px 14px;background:var(--nk-surface-2);border-radius:12px;border:1px solid var(--nk-border);display:flex;gap:0;text-align:center;">
+                <div style="flex:1;border-right:1px solid var(--nk-border);">
+                  <div style="font-size:16px;font-weight:800;color:var(--nk-yellow)">347</div>
+                  <div style="font-size:10px;color:var(--nk-text-3);margin-top:2px;">总照片</div>
+                </div>
+                <div style="flex:1;border-right:1px solid var(--nk-border);">
+                  <div style="font-size:16px;font-weight:800;color:var(--nk-green)">291</div>
+                  <div style="font-size:10px;color:var(--nk-text-3);margin-top:2px;">已传输</div>
+                </div>
+                <div style="flex:1;">
+                  <div style="font-size:16px;font-weight:800;color:var(--nk-orange)">56</div>
+                  <div style="font-size:10px;color:var(--nk-text-3);margin-top:2px;">未传输</div>
+                </div>
+              </div>
+
+            </div><!-- /screen-content -->
+
+            <!-- 底部 Nav -->
+            <div class="bottom-nav">
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>主页</span></div>
+              <div class="nav-item active"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2zm0 14H8V4h12v12z"/></svg><span>相册</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>传输</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M2.53 19.65l1.34.56v-9.03l-2.43 5.86c-.41 1.02.08 2.19 1.09 2.61zm19.5-3.7L17.07 3.98c-.31-.75-1.18-1.12-1.93-.81l-5.64 2.34c-.75.31-1.12 1.18-.81 1.93l4.96 11.97c.31.75 1.18 1.12 1.93.81l5.64-2.34c.75-.31 1.12-1.18.81-1.93zM7.88 10.83c0-1.22-.99-2.21-2.21-2.21S3.46 9.61 3.46 10.83c0 1.22.99 2.21 2.21 2.21s2.21-.99 2.21-2.21z"/></svg><span>预设</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.06 7.06 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.47.47 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg><span>设置</span></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div><!-- /phone 06 -->
+
+
+    <!-- ══════════════════════════════════════════════════
+         07 · 预设中心 (Preset Center)
+         PTP 0x90CC GetPictCtrlData / 0x90CD SetPictCtrlData
+         WB Color Shift A-B / G-M 轴 · Hue · Sat · Clarity
+         ══════════════════════════════════════════════════ -->
+    <div class="phone-wrap">
+      <div class="phone-label">07 · 预设中心 / 色彩偏移</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="screen" style="background:var(--nk-black);">
+
+            <!-- 状态栏 -->
+            <div class="status-bar">
+              <span class="status-time">09:04</span>
+              <div class="status-icons">
+                <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4 2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+              </div>
+            </div>
+
+            <div class="screen-content" style="padding-bottom:72px;">
+
+              <!-- ── AppBar ── -->
+              <div style="padding:12px 18px 8px;display:flex;align-items:center;gap:10px;">
+                <div style="flex:1;">
+                  <div style="font-size:18px;font-weight:800;letter-spacing:-0.5px;">预设中心</div>
+                  <div style="font-size:11px;color:var(--nk-text-3);margin-top:1px;">已保存 4 套 · 当前：风景A</div>
+                </div>
+                <!-- 新建预设按钮 -->
+                <div onclick="this.style.transform='scale(0.92)';setTimeout(()=>this.style.transform='',120)" style="display:flex;align-items:center;gap:5px;background:var(--nk-yellow);border-radius:10px;padding:7px 12px;cursor:pointer;transition:transform .1s;">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="#000"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+                  <span style="font-size:11px;font-weight:800;color:#000;">从快照</span>
+                </div>
+              </div>
+
+              <!-- ── 预设卡片列表（手风琴模式，编辑面板紧跟在各自卡片下方）── -->
+              <style>
+                .preset-edit-panel { overflow:hidden; max-height:0; transition:max-height .35s cubic-bezier(.4,0,.2,1), opacity .25s; opacity:0; }
+                .preset-edit-panel.open { max-height:800px; opacity:1; }
+                .preset-card { border-radius:14px; overflow:hidden; transition:border-color .2s; }
+              </style>
+              <div style="padding:0 14px 4px;display:flex;flex-direction:column;gap:8px;">
+
+                <!-- ─────────── 预设 1：风景A（激活中，默认展开）─────────── -->
+                <div class="preset-card" style="background:linear-gradient(135deg,rgba(255,196,0,.15),rgba(255,196,0,.05));border:1.5px solid var(--nk-yellow);">
+                  <!-- 卡片头部 -->
+                  <div style="padding:12px 14px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                      <div style="width:8px;height:8px;border-radius:50%;background:var(--nk-yellow);box-shadow:0 0 6px var(--nk-yellow);flex-shrink:0;"></div>
+                      <div style="font-size:13px;font-weight:800;flex:1;">风景A</div>
+                      <div style="font-size:9px;font-weight:700;color:var(--nk-yellow);background:rgba(255,196,0,.15);padding:3px 8px;border-radius:6px;">当前应用</div>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">WB 日光</span>
+                      <span style="font-size:9px;background:rgba(0,200,120,.1);border-radius:5px;padding:2px 7px;color:#00c878;">色相 +1</span>
+                      <span style="font-size:9px;background:rgba(0,200,120,.1);border-radius:5px;padding:2px 7px;color:#00c878;">饱和 +2</span>
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">对比 0</span>
+                      <span style="font-size:9px;background:rgba(255,140,0,.1);border-radius:5px;padding:2px 7px;color:#ff8c00;">WB偏 A+2/G+1</span>
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">sRGB</span>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                      <div onclick="(function(btn){var panel=btn.closest('.preset-card').querySelector('.preset-edit-panel');var open=panel.classList.toggle('open');btn.textContent=open?'收起':'编辑';})(this)" style="flex:1;text-align:center;background:var(--nk-surface-2);border-radius:8px;padding:5px 0;font-size:10px;font-weight:700;cursor:pointer;">收起</div>
+                      <div style="flex:1;text-align:center;background:var(--nk-surface-2);border-radius:8px;padding:5px 0;font-size:10px;font-weight:700;cursor:pointer;">复制</div>
+                      <div style="width:32px;text-align:center;background:rgba(255,59,48,.1);border-radius:8px;padding:5px 0;cursor:pointer;">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="#ff3b30"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ✦ 编辑面板（风景A，默认展开）-->
+                  <div class="preset-edit-panel open" style="border-top:1px solid rgba(255,196,0,.2);">
+                    <div style="background:rgba(255,196,0,.04);padding:10px 14px 4px;display:flex;align-items:center;gap:6px;">
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="var(--nk-yellow)"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7zm1-11h-2v3H8v2h3v3h2v-3h3v-2h-3z"/></svg>
+                      <div style="font-size:10px;font-weight:800;flex:1;color:var(--nk-yellow);">色彩偏移编辑</div>
+                      <div style="font-size:9px;color:var(--nk-text-3);">PTP 0x90CD</div>
+                    </div>
+                    <div style="padding:10px 14px 14px;display:flex;flex-direction:column;gap:12px;">
+                      <!-- WB 色偏坐标格 -->
+                      <div>
+                        <div style="font-size:9px;font-weight:700;color:var(--nk-text-2);margin-bottom:6px;letter-spacing:.5px;">白平衡色偏（A-B / G-M 轴）</div>
+                        <div style="position:relative;width:100%;padding-bottom:46%;background:var(--nk-surface-3);border-radius:10px;overflow:hidden;cursor:crosshair;">
+                          <svg style="position:absolute;inset:0;width:100%;height:100%;" viewBox="0 0 200 92" preserveAspectRatio="none">
+                            <line x1="100" y1="0" x2="100" y2="92" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                            <line x1="0" y1="46" x2="200" y2="46" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                            <line x1="33" y1="0" x2="33" y2="92" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+                            <line x1="66" y1="0" x2="66" y2="92" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+                            <line x1="133" y1="0" x2="133" y2="92" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+                            <line x1="166" y1="0" x2="166" y2="92" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+                            <line x1="0" y1="23" x2="200" y2="23" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+                            <line x1="0" y1="69" x2="200" y2="69" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+                            <defs>
+                              <linearGradient id="abG1" x1="0" y1="0" x2="1" y2="0">
+                                <stop offset="0%" stop-color="rgba(255,160,0,.2)"/>
+                                <stop offset="50%" stop-color="rgba(255,255,255,0)"/>
+                                <stop offset="100%" stop-color="rgba(40,120,255,.2)"/>
+                              </linearGradient>
+                              <linearGradient id="gmG1" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="rgba(0,200,80,.2)"/>
+                                <stop offset="50%" stop-color="rgba(255,255,255,0)"/>
+                                <stop offset="100%" stop-color="rgba(180,0,200,.2)"/>
+                              </linearGradient>
+                            </defs>
+                            <rect x="0" y="0" width="200" height="92" fill="url(#abG1)"/>
+                            <rect x="0" y="0" width="200" height="92" fill="url(#gmG1)"/>
+                            <!-- A+2 / G+1 → x≈133 y≈23 -->
+                            <circle cx="133" cy="23" r="5" fill="var(--nk-yellow)" stroke="#000" stroke-width="1.5" opacity=".95"/>
+                            <circle cx="133" cy="23" r="9" fill="none" stroke="var(--nk-yellow)" stroke-width="1" opacity=".45"/>
+                          </svg>
+                          <div style="position:absolute;top:3px;left:5px;font-size:7px;color:rgba(0,200,80,.85);font-weight:700;">G</div>
+                          <div style="position:absolute;bottom:3px;left:5px;font-size:7px;color:rgba(180,0,200,.85);font-weight:700;">M</div>
+                          <div style="position:absolute;top:50%;left:4px;transform:translateY(-50%);font-size:7px;color:rgba(255,160,0,.95);font-weight:700;">A</div>
+                          <div style="position:absolute;top:50%;right:4px;transform:translateY(-50%);font-size:7px;color:rgba(80,140,255,.95);font-weight:700;">B</div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;margin-top:5px;">
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">A-B 轴</div><div style="font-size:12px;font-weight:800;color:rgba(255,160,0,.9);">A+2</div></div>
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">重置</div><div style="font-size:10px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">0/0</div></div>
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">G-M 轴</div><div style="font-size:12px;font-weight:800;color:rgba(0,200,80,.9);">G+1</div></div>
+                        </div>
+                      </div>
+                      <!-- Picture Control 滑杆 -->
+                      <div>
+                        <div style="font-size:9px;font-weight:700;color:var(--nk-text-2);margin-bottom:6px;letter-spacing:.5px;">Picture Control</div>
+                        <div style="display:flex;flex-direction:column;gap:7px;">
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">色相</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#f44336,#ff9800,#ffeb3b,#4caf50,#2196f3,#9c27b0);border-radius:2px;"></div><div style="position:absolute;left:58.3%;width:11px;height:11px;background:var(--nk-yellow);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:#00c878;text-align:right;">+1</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">饱和</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#555,#F5B800);border-radius:2px;"></div><div style="position:absolute;left:66.7%;width:11px;height:11px;background:var(--nk-yellow);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:#00c878;text-align:right;">+2</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">对比</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#333,#fff);border-radius:2px;"></div><div style="position:absolute;left:50%;width:11px;height:11px;background:var(--nk-text-2);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:var(--nk-text-2);text-align:right;">0</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">清晰</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#1a1a2e,#4fc3f7);border-radius:2px;"></div><div style="position:absolute;left:50%;width:11px;height:11px;background:var(--nk-text-2);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:var(--nk-text-2);text-align:right;">0</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">锐化</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#333,#e0e0e0);border-radius:2px;"></div><div style="position:absolute;left:33.3%;width:11px;height:11px;background:var(--nk-text-2);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:var(--nk-text-2);text-align:right;">3</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">亮度</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#111,#fff);border-radius:2px;"></div><div style="position:absolute;left:50%;width:11px;height:11px;background:var(--nk-text-2);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:var(--nk-text-2);text-align:right;">0</div></div>
+                        </div>
+                      </div>
+                      <!-- 色彩空间 + 保存按钮 -->
+                      <div style="display:flex;gap:6px;align-items:center;">
+                        <div style="font-size:8px;color:var(--nk-text-3);flex-shrink:0;">色彩空间</div>
+                        <div style="flex:1;text-align:center;padding:5px 0;background:var(--nk-yellow);border-radius:7px;font-size:9px;font-weight:800;color:#000;cursor:pointer;">sRGB</div>
+                        <div style="flex:1;text-align:center;padding:5px 0;background:var(--nk-surface-3);border-radius:7px;font-size:9px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">AdobeRGB</div>
+                      </div>
+                      <div style="display:flex;gap:7px;">
+                        <div style="flex:1;text-align:center;padding:8px 0;background:var(--nk-surface-3);border-radius:9px;font-size:10px;font-weight:700;cursor:pointer;color:var(--nk-text-2);">重置默认</div>
+                        <div onclick="this.style.transform='scale(0.96)';setTimeout(()=>this.style.transform='',120)" style="flex:2;text-align:center;padding:8px 0;background:var(--nk-yellow);border-radius:9px;font-size:11px;font-weight:800;color:#000;cursor:pointer;transition:transform .1s;">应用到相机</div>
+                      </div>
+                    </div>
+                  </div><!-- /风景A 编辑面板 -->
+                </div><!-- /预设 1 -->
+
+                <!-- ─────────── 预设 2：人像柔光 ─────────── -->
+                <div class="preset-card" style="background:var(--nk-surface-2);border:1px solid var(--nk-border);">
+                  <div style="padding:12px 14px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                      <div style="width:8px;height:8px;border-radius:50%;background:var(--nk-surface-3);flex-shrink:0;"></div>
+                      <div style="font-size:13px;font-weight:800;flex:1;">人像柔光</div>
+                      <div style="font-size:9px;font-weight:800;background:var(--nk-yellow);color:#000;padding:3px 9px;border-radius:6px;cursor:pointer;">应用</div>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">WB 阴天</span>
+                      <span style="font-size:9px;background:rgba(255,100,100,.1);border-radius:5px;padding:2px 7px;color:#ff6464;">色相 −1</span>
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">饱和 0</span>
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">清晰 −1</span>
+                      <span style="font-size:9px;background:rgba(255,140,0,.1);border-radius:5px;padding:2px 7px;color:#ff8c00;">WB偏 A+1/M+1</span>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                      <div onclick="(function(btn){var panel=btn.closest('.preset-card').querySelector('.preset-edit-panel');var open=panel.classList.toggle('open');btn.textContent=open?'收起':'编辑';})(this)" style="flex:1;text-align:center;background:var(--nk-surface-3);border-radius:8px;padding:5px 0;font-size:10px;font-weight:700;cursor:pointer;">编辑</div>
+                      <div style="flex:1;text-align:center;background:var(--nk-surface-3);border-radius:8px;padding:5px 0;font-size:10px;font-weight:700;cursor:pointer;">复制</div>
+                      <div style="width:32px;text-align:center;background:rgba(255,59,48,.1);border-radius:8px;padding:5px 0;cursor:pointer;">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="#ff3b30"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- 编辑面板（折叠） -->
+                  <div class="preset-edit-panel" style="border-top:1px solid var(--nk-border);">
+                    <div style="background:rgba(255,196,0,.03);padding:10px 14px 4px;display:flex;align-items:center;gap:6px;">
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="var(--nk-yellow)"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7zm1-11h-2v3H8v2h3v3h2v-3h3v-2h-3z"/></svg>
+                      <div style="font-size:10px;font-weight:800;flex:1;color:var(--nk-yellow);">色彩偏移编辑</div>
+                      <div style="font-size:9px;color:var(--nk-text-3);">PTP 0x90CD</div>
+                    </div>
+                    <div style="padding:10px 14px 14px;display:flex;flex-direction:column;gap:12px;">
+                      <div>
+                        <div style="font-size:9px;font-weight:700;color:var(--nk-text-2);margin-bottom:6px;letter-spacing:.5px;">白平衡色偏（A-B / G-M 轴）</div>
+                        <div style="position:relative;width:100%;padding-bottom:46%;background:var(--nk-surface-3);border-radius:10px;overflow:hidden;cursor:crosshair;">
+                          <svg style="position:absolute;inset:0;width:100%;height:100%;" viewBox="0 0 200 92" preserveAspectRatio="none">
+                            <line x1="100" y1="0" x2="100" y2="92" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                            <line x1="0" y1="46" x2="200" y2="46" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                            <defs>
+                              <linearGradient id="abG2" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgba(255,160,0,.2)"/><stop offset="50%" stop-color="rgba(255,255,255,0)"/><stop offset="100%" stop-color="rgba(40,120,255,.2)"/></linearGradient>
+                              <linearGradient id="gmG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(0,200,80,.2)"/><stop offset="50%" stop-color="rgba(255,255,255,0)"/><stop offset="100%" stop-color="rgba(180,0,200,.2)"/></linearGradient>
+                            </defs>
+                            <rect x="0" y="0" width="200" height="92" fill="url(#abG2)"/>
+                            <rect x="0" y="0" width="200" height="92" fill="url(#gmG2)"/>
+                            <!-- A+1 / M+1 → x≈116 y≈69 -->
+                            <circle cx="116" cy="69" r="5" fill="var(--nk-yellow)" stroke="#000" stroke-width="1.5" opacity=".95"/>
+                            <circle cx="116" cy="69" r="9" fill="none" stroke="var(--nk-yellow)" stroke-width="1" opacity=".45"/>
+                          </svg>
+                          <div style="position:absolute;top:3px;left:5px;font-size:7px;color:rgba(0,200,80,.85);font-weight:700;">G</div>
+                          <div style="position:absolute;bottom:3px;left:5px;font-size:7px;color:rgba(180,0,200,.85);font-weight:700;">M</div>
+                          <div style="position:absolute;top:50%;left:4px;transform:translateY(-50%);font-size:7px;color:rgba(255,160,0,.95);font-weight:700;">A</div>
+                          <div style="position:absolute;top:50%;right:4px;transform:translateY(-50%);font-size:7px;color:rgba(80,140,255,.95);font-weight:700;">B</div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;margin-top:5px;">
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">A-B 轴</div><div style="font-size:12px;font-weight:800;color:rgba(255,160,0,.9);">A+1</div></div>
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">重置</div><div style="font-size:10px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">0/0</div></div>
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">G-M 轴</div><div style="font-size:12px;font-weight:800;color:rgba(180,0,200,.85);">M+1</div></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div style="font-size:9px;font-weight:700;color:var(--nk-text-2);margin-bottom:6px;letter-spacing:.5px;">Picture Control</div>
+                        <div style="display:flex;flex-direction:column;gap:7px;">
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">色相</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#f44336,#ff9800,#ffeb3b,#4caf50,#2196f3,#9c27b0);border-radius:2px;"></div><div style="position:absolute;left:41.7%;width:11px;height:11px;background:var(--nk-yellow);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:#ff6464;text-align:right;">−1</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">饱和</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#555,#F5B800);border-radius:2px;"></div><div style="position:absolute;left:50%;width:11px;height:11px;background:var(--nk-text-2);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:var(--nk-text-2);text-align:right;">0</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">清晰</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#1a1a2e,#4fc3f7);border-radius:2px;"></div><div style="position:absolute;left:41.7%;width:11px;height:11px;background:var(--nk-yellow);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:#ff6464;text-align:right;">−1</div></div>
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:7px;">
+                        <div style="flex:1;text-align:center;padding:8px 0;background:var(--nk-surface-3);border-radius:9px;font-size:10px;font-weight:700;cursor:pointer;color:var(--nk-text-2);">重置默认</div>
+                        <div style="flex:2;text-align:center;padding:8px 0;background:var(--nk-yellow);border-radius:9px;font-size:11px;font-weight:800;color:#000;cursor:pointer;">应用到相机</div>
+                      </div>
+                    </div>
+                  </div><!-- /人像柔光 编辑面板 -->
+                </div><!-- /预设 2 -->
+
+                <!-- ─────────── 预设 3：夜景高感 ─────────── -->
+                <div class="preset-card" style="background:var(--nk-surface-2);border:1px solid var(--nk-border);">
+                  <div style="padding:12px 14px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                      <div style="width:8px;height:8px;border-radius:50%;background:var(--nk-surface-3);flex-shrink:0;"></div>
+                      <div style="font-size:13px;font-weight:800;flex:1;">夜景高感</div>
+                      <div style="font-size:9px;font-weight:800;background:var(--nk-yellow);color:#000;padding:3px 9px;border-radius:6px;cursor:pointer;">应用</div>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">WB 自动</span>
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">饱和 −1</span>
+                      <span style="font-size:9px;background:rgba(0,200,120,.1);border-radius:5px;padding:2px 7px;color:#00c878;">对比 +1</span>
+                      <span style="font-size:9px;background:var(--nk-surface-3);border-radius:5px;padding:2px 7px;color:var(--nk-text-2);">锐化 3</span>
+                      <span style="font-size:9px;background:rgba(255,140,0,.1);border-radius:5px;padding:2px 7px;color:#ff8c00;">WB偏 0/0</span>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                      <div onclick="(function(btn){var panel=btn.closest('.preset-card').querySelector('.preset-edit-panel');var open=panel.classList.toggle('open');btn.textContent=open?'收起':'编辑';})(this)" style="flex:1;text-align:center;background:var(--nk-surface-3);border-radius:8px;padding:5px 0;font-size:10px;font-weight:700;cursor:pointer;">编辑</div>
+                      <div style="flex:1;text-align:center;background:var(--nk-surface-3);border-radius:8px;padding:5px 0;font-size:10px;font-weight:700;cursor:pointer;">复制</div>
+                      <div style="width:32px;text-align:center;background:rgba(255,59,48,.1);border-radius:8px;padding:5px 0;cursor:pointer;">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="#ff3b30"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- 编辑面板（折叠） -->
+                  <div class="preset-edit-panel" style="border-top:1px solid var(--nk-border);">
+                    <div style="background:rgba(255,196,0,.03);padding:10px 14px 4px;display:flex;align-items:center;gap:6px;">
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="var(--nk-yellow)"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7zm1-11h-2v3H8v2h3v3h2v-3h3v-2h-3z"/></svg>
+                      <div style="font-size:10px;font-weight:800;flex:1;color:var(--nk-yellow);">色彩偏移编辑</div>
+                      <div style="font-size:9px;color:var(--nk-text-3);">PTP 0x90CD</div>
+                    </div>
+                    <div style="padding:10px 14px 14px;display:flex;flex-direction:column;gap:12px;">
+                      <div>
+                        <div style="font-size:9px;font-weight:700;color:var(--nk-text-2);margin-bottom:6px;letter-spacing:.5px;">白平衡色偏（A-B / G-M 轴）</div>
+                        <div style="position:relative;width:100%;padding-bottom:46%;background:var(--nk-surface-3);border-radius:10px;overflow:hidden;cursor:crosshair;">
+                          <svg style="position:absolute;inset:0;width:100%;height:100%;" viewBox="0 0 200 92" preserveAspectRatio="none">
+                            <line x1="100" y1="0" x2="100" y2="92" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                            <line x1="0" y1="46" x2="200" y2="46" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+                            <defs>
+                              <linearGradient id="abG3" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="rgba(255,160,0,.2)"/><stop offset="50%" stop-color="rgba(255,255,255,0)"/><stop offset="100%" stop-color="rgba(40,120,255,.2)"/></linearGradient>
+                              <linearGradient id="gmG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(0,200,80,.2)"/><stop offset="50%" stop-color="rgba(255,255,255,0)"/><stop offset="100%" stop-color="rgba(180,0,200,.2)"/></linearGradient>
+                            </defs>
+                            <rect x="0" y="0" width="200" height="92" fill="url(#abG3)"/>
+                            <rect x="0" y="0" width="200" height="92" fill="url(#gmG3)"/>
+                            <!-- 0/0 → 正中 100,46 -->
+                            <circle cx="100" cy="46" r="5" fill="var(--nk-yellow)" stroke="#000" stroke-width="1.5" opacity=".95"/>
+                            <circle cx="100" cy="46" r="9" fill="none" stroke="var(--nk-yellow)" stroke-width="1" opacity=".45"/>
+                          </svg>
+                          <div style="position:absolute;top:3px;left:5px;font-size:7px;color:rgba(0,200,80,.85);font-weight:700;">G</div>
+                          <div style="position:absolute;bottom:3px;left:5px;font-size:7px;color:rgba(180,0,200,.85);font-weight:700;">M</div>
+                          <div style="position:absolute;top:50%;left:4px;transform:translateY(-50%);font-size:7px;color:rgba(255,160,0,.95);font-weight:700;">A</div>
+                          <div style="position:absolute;top:50%;right:4px;transform:translateY(-50%);font-size:7px;color:rgba(80,140,255,.95);font-weight:700;">B</div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;margin-top:5px;">
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">A-B 轴</div><div style="font-size:12px;font-weight:800;color:var(--nk-text-2);">0</div></div>
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">重置</div><div style="font-size:10px;font-weight:700;color:var(--nk-text-2);cursor:pointer;">0/0</div></div>
+                          <div style="text-align:center;"><div style="font-size:8px;color:var(--nk-text-3);">G-M 轴</div><div style="font-size:12px;font-weight:800;color:var(--nk-text-2);">0</div></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div style="font-size:9px;font-weight:700;color:var(--nk-text-2);margin-bottom:6px;letter-spacing:.5px;">Picture Control</div>
+                        <div style="display:flex;flex-direction:column;gap:7px;">
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">饱和</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#555,#F5B800);border-radius:2px;"></div><div style="position:absolute;left:41.7%;width:11px;height:11px;background:var(--nk-yellow);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:#ff6464;text-align:right;">−1</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">对比</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#333,#fff);border-radius:2px;"></div><div style="position:absolute;left:58.3%;width:11px;height:11px;background:var(--nk-yellow);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:#00c878;text-align:right;">+1</div></div>
+                          <div style="display:flex;align-items:center;gap:7px;"><div style="width:30px;font-size:8px;color:var(--nk-text-3);flex-shrink:0;">锐化</div><div style="flex:1;position:relative;height:16px;display:flex;align-items:center;"><div style="width:100%;height:3px;background:linear-gradient(to right,#333,#e0e0e0);border-radius:2px;"></div><div style="position:absolute;left:33.3%;width:11px;height:11px;background:var(--nk-text-2);border-radius:50%;border:2px solid #000;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab;"></div></div><div style="width:20px;font-size:10px;font-weight:800;color:var(--nk-text-2);text-align:right;">3</div></div>
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:7px;">
+                        <div style="flex:1;text-align:center;padding:8px 0;background:var(--nk-surface-3);border-radius:9px;font-size:10px;font-weight:700;cursor:pointer;color:var(--nk-text-2);">重置默认</div>
+                        <div style="flex:2;text-align:center;padding:8px 0;background:var(--nk-yellow);border-radius:9px;font-size:11px;font-weight:800;color:#000;cursor:pointer;">应用到相机</div>
+                      </div>
+                    </div>
+                  </div><!-- /夜景高感 编辑面板 -->
+                </div><!-- /预设 3 -->
+
+              </div><!-- /预设列表 -->
+
+              <!-- ── 自动应用规则 ── -->
+              <div style="margin:10px 14px 0;background:var(--nk-surface-2);border:1px solid var(--nk-border);border-radius:14px;overflow:hidden;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--nk-border);display:flex;align-items:center;gap:8px;">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--nk-text-2)"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                  <div style="font-size:12px;font-weight:800;flex:1;">自动应用规则</div>
+                  <!-- Toggle 开关 -->
+                  <div style="width:36px;height:20px;background:rgba(0,200,120,.4);border-radius:10px;position:relative;cursor:pointer;">
+                    <div style="position:absolute;right:2px;top:2px;width:16px;height:16px;background:#00c878;border-radius:50%;transition:right .2s;"></div>
+                  </div>
+                </div>
+                <div style="padding:10px 14px;display:flex;flex-direction:column;gap:8px;">
+
+                  <!-- 规则 1：时间触发 -->
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--nk-surface-3);border-radius:10px;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--nk-yellow)"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm.01 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                    <div style="flex:1;">
+                      <div style="font-size:10px;font-weight:800;">06:00–17:00 → 风景A</div>
+                      <div style="font-size:9px;color:var(--nk-text-3);">时间段触发</div>
+                    </div>
+                    <div style="width:8px;height:8px;border-radius:50%;background:#00c878;"></div>
+                  </div>
+
+                  <!-- 规则 2：夜景 -->
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--nk-surface-3);border-radius:10px;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--nk-text-2)"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+                    <div style="flex:1;">
+                      <div style="font-size:10px;font-weight:800;">17:00–06:00 → 夜景高感</div>
+                      <div style="font-size:9px;color:var(--nk-text-3);">时间段触发</div>
+                    </div>
+                    <div style="width:8px;height:8px;border-radius:50%;background:var(--nk-surface-2);border:1px solid var(--nk-border);"></div>
+                  </div>
+
+                  <!-- 添加规则 -->
+                  <div style="text-align:center;padding:7px 0;border:1px dashed var(--nk-border);border-radius:10px;font-size:10px;color:var(--nk-text-3);cursor:pointer;">
+                    + 添加新规则（时间 / GPS / 手动）
+                  </div>
+
+                </div>
+              </div><!-- /自动规则 -->
+
+            </div><!-- /screen-content -->
+
+            <!-- ── 底部导航 ── -->
+            <div class="bottom-nav">
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>主页</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg><span>相册</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>传输</span></div>
+              <div class="nav-item active"><svg viewBox="0 0 24 24"><path d="M2.53 19.65l1.34.56v-9.03l-2.43 5.86c-.41 1.02.08 2.19 1.09 2.61zm19.5-3.7L17.07 3.98c-.31-.75-1.18-1.12-1.93-.81l-5.64 2.34c-.75.31-1.12 1.18-.81 1.93l4.96 11.97c.31.75 1.18 1.12 1.93.81l5.64-2.34c.75-.31 1.12-1.18.81-1.93zM7.88 10.83c0-1.22-.99-2.21-2.21-2.21S3.46 9.61 3.46 10.83c0 1.22.99 2.21 2.21 2.21s2.21-.99 2.21-2.21z"/></svg><span>预设</span></div>
+              <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.06 7.06 0 0 0-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.47.47 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg><span>设置</span></div>
+            </div>
+
+          </div><!-- /screen -->
+        </div><!-- /phone-screen -->
+      </div><!-- /phone -->
+    </div><!-- /phone 07 -->
+
+</div><!-- /stage -->
+
+</body>
+</html>

@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 相机机身 -->
+    <path
+        android:fillColor="#F5B800"
+        android:pathData="M30,40h48c3.3,0,6,2.7,6,6v28c0,3.3,-2.7,6,-6,6H30c-3.3,0,-6,-2.7,-6,-6V46c0,-3.3,2.7,-6,6,-6z"/>
+    <!-- 镜头环 -->
+    <path
+        android:fillColor="#0E0E0E"
+        android:pathData="M42,54c0,-6.6,5.4,-12,12,-12s12,5.4,12,12s-5.4,12,-12,12s-12,-5.4,-12,-12z"/>
+    <path
+        android:fillColor="#F5B800"
+        android:pathData="M46,54c0,-4.4,3.6,-8,8,-8s8,3.6,8,8s-3.6,8,-8,8s-8,-3.6,-8,-8z"/>
+    <!-- 闪光灯/取景器 (圆角矩形,用 path 替代 rect — VectorDrawable 不支持 <rect>) -->
+    <path
+        android:fillColor="#F5B800"
+        android:pathData="M41,32 h8 a2,2 0 0 1 2,2 v1 a2,2 0 0 1 -2,2 h-8 a2,2 0 0 1 -2,-2 v-1 a2,2 0 0 1 2,-2 z"/>
+</vector>

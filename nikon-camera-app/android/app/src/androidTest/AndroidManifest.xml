@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      测试宿主 Activity (TestComponentActivity) 的声明已移到 app 的 debug 变体 manifest
+      (app/src/debug/AndroidManifest.xml), 作为 app 包组件运行在 app 进程, 由 app APK
+      classloader 加载, 避免测试包 classloader 引发的 ClassNotFound / different process 死结。
+      本 androidTest manifest 仅保留最小内容, AGP 会自动合并生成 instrumentation 标签。
+    -->
+
+</manifest>

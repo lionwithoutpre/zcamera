@@ -51,7 +51,7 @@ static inline int ptp_to_cam(int ptp_rc) {
     case 0x2001: return CAM_ERR_NOT_SUPPORTED;
     case 0x2002: return CAM_ERR_BUSY;
     case 0x2006: return CAM_ERR_BUSY;
-    case 0x200A: return CAM_ERR_INVALID_PARAM;
+    case 0x200A: return CAM_ERR_PERMISSION_DENIED;
     case 0x200C: return CAM_ERR_NOT_SUPPORTED;
     case 0x2014: return CAM_ERR_FILE_NOT_FOUND;
     case 0x2019: return CAM_ERR_NOT_CONNECTED;

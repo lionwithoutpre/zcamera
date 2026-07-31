@@ -11,8 +11,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -21,6 +27,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -115,15 +122,15 @@ class CameraService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-
+    
         // 前台通知必须最先就位:Android 8+ 要求 startForeground 在 onCreate 后 5 秒内
         // 调用,否则系统抛 RemoteServiceException 直接杀进程。放在 nativeCreate 之前,
         // 即使 native 初始化耗时/阻塞也不会触发超时闪退。
         createNotificationChannel()
         startForeground(NOTIF_ID, buildNotification("待机中"))
-
+    
         // native 初始化:可能失败(无 .so / 无相机硬件 / 异常)。必须捕获,
-        // 否则会让整个 App 进程崩溃。失败时进入"待机"模式,UI 显示未连接,
+        // 否则会让整个 App 进程崩溃。失败时进入“待机”模式,UI 显示未连接,
         // 用户插入相机后仍可正常工作。
         try {
             val h = CameraBridge.nativeCreate(CameraBridge.TRANSPORT_AUTO)
@@ -136,8 +143,10 @@ class CameraService : Service() {
         } catch (t: Throwable) {
             Log.e(TAG, "nativeCreate 失败,进入待机模式", t)
         }
-
+    
         registerUsbReceiver()
+        registerNetworkCallback()
+        requestBatteryOptimizationWhitelist()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -177,6 +186,8 @@ class CameraService : Service() {
 
     private fun cleanup() {
         unregisterUsbReceiver()
+        unregisterNetworkCallback()
+        usbReconnectJob?.cancel()
         serviceScope.cancel()
         if (handle != 0L) {
             CameraBridge.nativeDestroy(handle)
@@ -263,13 +274,48 @@ class CameraService : Service() {
             if (handle != 0L) {
                 CameraBridge.nativeDisconnect(handle)
             }
-            // 通知 ViewModel 层状态变更(通过 Application 单例广播)
-            // ViewModel 的 status 轮询或下次操作会感知到断开
-            updateNotification("USB 相机已断开")
+            updateNotification("USB 相机已断开, 等待重新插入...")
         }
         pendingUsbDevice = null
         try { usbConnection?.close() } catch (_: Exception) {}
         usbConnection = null
+
+        // 启动 USB 重连等待 (30s 内等待设备重新插入)
+        startUsbReconnectWait()
+    }
+
+    // ─── USB 断连重连策略 ────────────────────────────────
+
+    private var usbReconnectJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * USB 拔出后等待重新插入 (30s 窗口)。
+     * 如果在此期间设备重新插入, usbReceiver 会触发 ATTACHED 事件并自动连接。
+     * 超时后放弃等待, 进入待机模式。
+     */
+    private fun startUsbReconnectWait() {
+        usbReconnectJob?.cancel()
+        usbReconnectJob = serviceScope.launch {
+            val timeoutMs = 30_000L
+            val pollMs = 2_000L
+            var elapsed = 0L
+            while (elapsed < timeoutMs) {
+                delay(pollMs)
+                elapsed += pollMs
+                // 检查是否已有尼康设备重新插入
+                val usbManager = getSystemService(Context.USB_SERVICE) as? UsbManager
+                val nikonDevice = usbManager?.deviceList?.values?.firstOrNull {
+                    it.vendorId == NIkon_VENDOR_ID
+                }
+                if (nikonDevice != null) {
+                    Log.i(TAG, "USB 重连: 检测到相机重新插入")
+                    onUsbDeviceAttached(nikonDevice)
+                    return@launch
+                }
+            }
+            Log.w(TAG, "USB 重连超时 (30s), 进入待机模式")
+            updateNotification("待机中 - 未连接相机")
+        }
     }
 
     /**
@@ -397,6 +443,95 @@ class CameraService : Service() {
             } catch (_: Exception) {
                 -1
             }
+        }
+    }
+
+    // ─── WiFi 网络状态监听 + 断连重连 ─────────────────────
+
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var wifiReconnectJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 注册网络状态回调。
+     * WiFi 断开时自动尝试重连 (5次, 间隔 3s)。
+     */
+    private fun registerNetworkCallback() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: Network) {
+                Log.w(TAG, "WiFi 网络丢失, 尝试重连...")
+                startWifiReconnect()
+            }
+
+            override fun onAvailable(network: Network) {
+                Log.i(TAG, "WiFi 网络可用")
+                wifiReconnectJob?.cancel()
+            }
+        }
+        try {
+            cm.registerNetworkCallback(request, networkCallback!!)
+        } catch (e: Exception) {
+            Log.w(TAG, "注册 NetworkCallback 失败", e)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        wifiReconnectJob?.cancel()
+        networkCallback?.let { cb ->
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            try { cm?.unregisterNetworkCallback(cb) } catch (_: Exception) {}
+        }
+        networkCallback = null
+    }
+
+    /**
+     * WiFi 断连重连策略: 最多 5 次, 间隔 3s。
+     * 重连成功后重新建立 PTP 会话。
+     */
+    private fun startWifiReconnect() {
+        wifiReconnectJob?.cancel()
+        wifiReconnectJob = serviceScope.launch {
+            val maxRetries = 5
+            val intervalMs = 3_000L
+            for (attempt in 1..maxRetries) {
+                updateNotification("WiFi 重连中 ($attempt/$maxRetries)...")
+                delay(intervalMs)
+
+                if (handle == 0L) return@launch
+                // 尝试重新连接 (native 层会重新建立 TCP + PTP 会话)
+                val status = CameraBridge.nativeGetStatus(handle)
+                if (status == CameraBridge.STATUS_CONNECTED) {
+                    Log.i(TAG, "WiFi 重连成功")
+                    updateNotification("已连接 (WiFi)")
+                    return@launch
+                }
+            }
+            Log.w(TAG, "WiFi 重连失败 ($maxRetries 次)")
+            updateNotification("WiFi 连接失败, 请检查网络")
+        }
+    }
+
+    // ─── 电池优化白名单 ───────────────────────────────────
+
+    /**
+     * 请求加入电池优化白名单, 防止后台服务被系统杀死。
+     * 用户拒绝也无妨, 前台服务本身已有很高的存活优先级。
+     */
+    private fun requestBatteryOptimizationWhitelist() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            if (pm.isIgnoringBatteryOptimizations(packageName)) return
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = android.net.Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "请求电池优化白名单失败", e)
         }
     }
 

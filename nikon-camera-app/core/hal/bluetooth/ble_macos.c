@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include <unistd.h>
 
 #ifdef __OBJC__
 #import <CoreBluetooth/CoreBluetooth.h>

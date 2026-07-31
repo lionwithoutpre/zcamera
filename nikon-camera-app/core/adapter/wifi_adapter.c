@@ -59,7 +59,7 @@ static CameraResult _wifi_execute(void *ctx, CameraCommand *cmd) {
     const CommandMapping *m = _find_mapping(cmd->type);
     if (!m) return _make_error(CAM_ERR_NOT_SUPPORTED, "command not mapped");
 
-    if (m->needs_session && c->session->state < SESSION_OPEN) {
+    if (m->needs_session && (!c->session || c->session->state < SESSION_OPEN)) {
         return _make_error(CAM_ERR_NOT_CONNECTED, "session not open");
     }
 
@@ -168,6 +168,67 @@ static CameraResult _wifi_execute(void *ctx, CameraCommand *cmd) {
             return _make_error(CAM_ERR_PROTOCOL, "GetLiveViewImage failed");
         }
         return _make_ok(frame, out_len);
+    }
+
+    case CAM_CMD_CAPTURE_BURST: {
+        uint32_t burst_params[5] = {
+            (uint32_t)cmd->params.capture.count,
+            (uint32_t)cmd->params.capture.interval_ms,
+            0, 0, 0
+        };
+        uint32_t out_len = 0;
+        int rc = ptp_exec(c->session,
+                          (uint16_t)m->ptp_opcode,
+                          burst_params, 2,
+                          NULL, 0, NULL, 0, &out_len);
+        if (rc != (int)PTP_RC_OK)
+            return _make_error(CAM_ERR_BUSY, "burst capture failed");
+        return _make_ok(NULL, 0);
+    }
+
+    case CAM_CMD_STOP_BURST: {
+        uint32_t out_len = 0;
+        ptp_exec(c->session, (uint16_t)NIKON_OC_ShutterRelease,
+                 NULL, 0, NULL, 0, NULL, 0, &out_len);
+        return _make_ok(NULL, 0);
+    }
+
+    case CAM_CMD_AUTOFOCUS: {
+        uint32_t out_len = 0;
+        int rc = ptp_exec(c->session,
+                          (uint16_t)NIKON_OC_AutoFocus,
+                          NULL, 0, NULL, 0, NULL, 0, &out_len);
+        return rc == (int)PTP_RC_OK
+            ? _make_ok(NULL, 0)
+            : _make_error(CAM_ERR_BUSY, "AutoFocus failed");
+    }
+
+    case CAM_CMD_SET_PICTCTRL: {
+        uint32_t out_len = 0;
+        int rc = ptp_exec(c->session,
+                          (uint16_t)NIKON_OC_SetPictCtrlData,
+                          NULL, 0,
+                          (uint8_t *)&cmd->params.pictctrl,
+                          sizeof(PictureControl),
+                          NULL, 0, &out_len);
+        return rc == (int)PTP_RC_OK
+            ? _make_ok(NULL, 0)
+            : _make_error(CAM_ERR_PROTOCOL, "SetPictCtrlData failed");
+    }
+
+    case CAM_CMD_GET_PICTCTRL: {
+        PictureControl *pc = (PictureControl *)malloc(sizeof(PictureControl));
+        if (!pc) return _make_error(CAM_ERR_OUT_OF_MEMORY, "oom");
+        uint32_t out_len = 0;
+        int rc = ptp_exec(c->session,
+                          (uint16_t)NIKON_OC_GetPictCtrlData,
+                          NULL, 0, NULL, 0,
+                          (uint8_t *)pc, sizeof(PictureControl), &out_len);
+        if (rc != (int)PTP_RC_OK) {
+            free(pc);
+            return _make_error(CAM_ERR_PROTOCOL, "GetPictCtrlData failed");
+        }
+        return _make_ok(pc, sizeof(PictureControl));
     }
 
     case CAM_CMD_DEVICE_INFO: {

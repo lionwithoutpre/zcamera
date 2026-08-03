@@ -4,6 +4,8 @@
 #include "protocol/ptp.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <strings.h>
 
 /* ─── MTP 对象信息结构体 ────────────────────────────────────── */
 

@@ -181,7 +181,8 @@ int ptp_exec(PtpSession *session,
     int n = param_count < 5 ? param_count : 5;
     for (int i = 0; i < n; i++) cmd.params[i] = params ? params[i] : 0;
 
-    cmd.header.length = (uint32_t)(sizeof(PtpContainerHeader) + 4 + 2 + n * 4);
+    /* header(12) + operation_code(2) + session_id(2) + params(n*4) */
+    cmd.header.length = (uint32_t)(sizeof(PtpContainerHeader) + 2 + 2 + n * 4);
 
     /* ── 2) 发送命令包 ── */
     int rc;

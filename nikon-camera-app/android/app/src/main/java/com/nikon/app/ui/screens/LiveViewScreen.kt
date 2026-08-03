@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.produceState
@@ -33,6 +34,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nikon.app.ui.components.CameraParamRanges
+import com.nikon.app.ui.components.ParameterRuler
 import com.nikon.app.ui.theme.*
 
 /**
@@ -64,18 +67,57 @@ fun LiveViewScreen(
     // 拍摄参数来自 ViewModel 轮询(连接后每 2s 刷新)
     val props by viewModel.cameraProperties.collectAsStateWithLifecycle()
     val cameras by viewModel.cameras.collectAsStateWithLifecycle()
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val connected = status == com.nikon.app.jni.CameraBridge.STATUS_CONNECTED ||
+                    status == com.nikon.app.jni.CameraBridge.STATUS_TRANSFERRING
     val batteryLevel = cameras.firstOrNull()?.batteryLevel ?: 0
     val shutter = props.shutterSpeed
     val aperture = props.aperture
     val iso = props.iso
     val ev = props.ev
 
-    // 实时取景帧:进页面 startLiveView,退出 stopLiveView
+    // 实时取景帧:进页面 startLiveView,退出 stopLiveView(仅连接时)
     val lvFrame by viewModel.liveViewFrame.collectAsStateWithLifecycle()
     val lvActive by viewModel.liveViewActive.collectAsStateWithLifecycle()
     DisposableEffect(Unit) {
-        viewModel.startLiveView()
+        if (connected) viewModel.startLiveView()
         onDispose { viewModel.stopLiveView() }
+    }
+
+    // 未连接时显示提示并允许返回
+    if (!connected) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Filled.Videocam,
+                    null,
+                    tint = NikonText3,
+                    modifier = Modifier.size(48.dp),
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("未连接相机", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NikonText2)
+                Spacer(Modifier.height(6.dp))
+                Text("请先在主页连接相机后再进入实时取景", fontSize = 12.sp, color = NikonText3)
+                Spacer(Modifier.height(24.dp))
+                Surface(
+                    onClick = onBack,
+                    color = NikonYellow,
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text(
+                        "返回主页",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                        color = NikonBlack,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+        }
+        return
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -168,27 +210,10 @@ fun LiveViewScreen(
                 .padding(end = 10.dp),
         )
 
-        // ── 5. 参数调节浮层(条件显示,居中偏下)──
-        adjustingParam?.let { param ->
-            ParamAdjusterOverlay(
-                param = param,
-                value = when (param) {
-                    "快门" -> shutter
-                    "光圈" -> aperture
-                    "ISO" -> "ISO $iso"
-                    "EV" -> "${ev}EV"
-                    else -> ""
-                },
-                onDecrement = { viewModel.adjustProperty(propIdFor(param), -1) },
-                onIncrement = { viewModel.adjustProperty(propIdFor(param), +1) },
-                onDismiss = { adjustingParam = null },
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(top = 60.dp),
-            )
-        }
+        // ── 5. 参数刻度尺(点击参数时展开) ──
+        // (已移至底部控制区内)
 
-        // ── 6. 底部控制区:参数展示行 + 快门行 ──
+        // ── 6. 底部控制区:参数刻度尺 + 参数展示行 + 快门行 ──
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -196,14 +221,39 @@ fun LiveViewScreen(
                 .padding(bottom = 28.dp)
                 .padding(horizontal = 18.dp),
         ) {
-            // HUD 参数展示行(4 列,可点击触发调节浮层)
+            // 参数刻度尺 (点击参数后展开)
+            adjustingParam?.let { param ->
+                val (label, values, current) = when (param) {
+                    "快门" -> Triple("SHUTTER", CameraParamRanges.SHUTTER, shutter)
+                    "光圈" -> Triple("APERTURE", CameraParamRanges.APERTURE, aperture)
+                    "ISO"  -> Triple("ISO", CameraParamRanges.ISO, iso)
+                    "EV"   -> Triple("EV", CameraParamRanges.EV, ev)
+                    else   -> Triple("", emptyList(), "")
+                }
+                if (values.isNotEmpty()) {
+                    ParameterRuler(
+                        label = label,
+                        values = values,
+                        currentValue = current,
+                        onValueSelected = { newVal ->
+                            // 模拟设置参数 (实际应通过 PTP 下发)
+                            adjustingParam = null
+                        },
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+            }
+
+            // HUD 参数展示行(4 列,可点击触发刻度尺)
             ParamDisplayRow(
                 shutter = shutter,
                 aperture = aperture,
                 iso = iso,
                 ev = ev,
-                activeParam = "光圈",
-                onParamClick = { adjustingParam = it },
+                activeParam = adjustingParam ?: "",
+                onParamClick = { param ->
+                    adjustingParam = if (adjustingParam == param) null else param
+                },
             )
             Spacer(Modifier.height(12.dp))
             // 快门行:连拍控制 + 连拍计数 + 快门按钮 + 相册
@@ -538,25 +588,34 @@ private fun ParamDisplayRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        params.forEach { (label, value, active) ->
+        params.forEach { (label, value, _) ->
+            val isActive = label == activeParam
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onParamClick(label) }
-                    .padding(vertical = 2.dp),
+                    .padding(vertical = 5.dp, horizontal = 4.dp)
+                    .then(
+                        if (isActive) Modifier
+                            .background(NikonYellow.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .border(1.dp, NikonYellow.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                        else Modifier
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    if (active) "$label ▸" else label,
-                    fontSize = 10.sp,
+                    label,
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (active) NikonYellow else NikonText3,
+                    color = if (isActive) NikonYellow else Color(0x80FFFFFF),
+                    letterSpacing = 0.8.sp,
                 )
                 Text(
                     value,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = if (active) NikonYellow else NikonText,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = if (isActive) NikonYellow else NikonText,
                 )
             }
         }

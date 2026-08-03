@@ -139,6 +139,14 @@ CameraAdapter *adapter_create_ptp(PtpSession *session);
  */
 CameraAdapter *adapter_create_wifi(const char *ip_addr, uint16_t port);
 
+/**
+ * 注入外部 PtpSession 到 Wi-Fi 适配器。
+ * 用于 Wi-Fi 模式下复用 PTP 协议栈。
+ * @param adapter  Wi-Fi 适配器实例
+ * @param session  已初始化的 PTP 会话
+ */
+void adapter_wifi_set_session(CameraAdapter *adapter, PtpSession *session);
+
 /** 执行命令 (调用 vtable->execute)。 */
 static inline CameraResult adapter_execute(CameraAdapter *a, CameraCommand *cmd) {
     return a->vtable->execute(a->ctx, cmd);

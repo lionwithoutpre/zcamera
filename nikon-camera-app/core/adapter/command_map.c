@@ -23,6 +23,7 @@ const CommandMapping kNikonCommandMappings[] = {
     /* 尼康私有命令 */
     { CAM_CMD_CAPTURE,            NIKON_OC_Capture,             1,          1,             10000 },
     { CAM_CMD_CAPTURE_BURST,      NIKON_OC_Capture,             1,          1,             30000 },
+    { CAM_CMD_STOP_BURST,         NIKON_OC_ShutterRelease,      1,          1,             3000  },
     { CAM_CMD_START_LIVEVIEW,     NIKON_OC_StartLiveView,       1,          1,             5000  },
     { CAM_CMD_STOP_LIVEVIEW,      NIKON_OC_EndLiveView,         1,          1,             3000  },
     { CAM_CMD_GET_LIVEVIEW,       NIKON_OC_GetLiveViewImage,    1,          1,             3000  },

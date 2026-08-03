@@ -75,7 +75,7 @@ elseif(PLATFORM_WINDOWS)
     list(APPEND CORE_SOURCES
         hal/usb/usb_win.c
         hal/wifi/wifi_posix.c
-        hal/bluetooth/ble_linux.c)
+        hal/bluetooth/ble_win.c)
     if(LIBUSB_FOUND)
         list(APPEND CORE_PUBLIC_LIBS ${LIBUSB_LIBRARIES})
         list(APPEND CORE_PUBLIC_INCLUDE_DIRS ${LIBUSB_INCLUDE_DIRS})

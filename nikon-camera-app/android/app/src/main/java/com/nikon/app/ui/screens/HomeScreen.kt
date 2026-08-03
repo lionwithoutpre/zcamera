@@ -2,6 +2,7 @@ package com.nikon.app.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -28,11 +29,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nikon.app.jni.CameraBridge
+import com.nikon.app.ui.components.StatusCapsule
 import com.nikon.app.ui.theme.*
 import com.nikon.app.viewmodel.CameraInfo
 import com.nikon.app.viewmodel.CameraViewModel
@@ -56,6 +60,9 @@ fun HomeScreen(
     val serviceReady by viewModel.serviceReady.collectAsStateWithLifecycle()
     val selectedCamera = cameras.firstOrNull()
 
+    // 连接方式选择提升到 HomeScreen 层级,避免 SCANNING↔DISCONNECTED 切换时重置
+    var transport by remember { mutableStateOf(0) } // 0=USB 1=Wi-Fi 2=BLE
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -63,20 +70,20 @@ fun HomeScreen(
     ) {
         // ── 顶部栏 ──
         HomeTopBar(
-            connected = status == CameraBridge.STATUS_CONNECTED,
+            status = status,
             model = selectedCamera?.model,
             onDisconnect = { viewModel.disconnect() },
         )
 
         when (status) {
             CameraBridge.STATUS_DISCONNECTED -> {
-                // 已扫描出设备但未连接时(status 回到 DISCONNECTED, cameras 已填充),
-                // 这里必须展示真实 cameras 列表,否则设备卡永不出现(UI bug)。
                 ScanContent(
                     isScanning = false,
                     cameras = cameras,
                     error = error,
                     serviceReady = serviceReady,
+                    transport = transport,
+                    onTransportChange = { transport = it },
                     onScan = { viewModel.scan() },
                     onConnect = { viewModel.connect(it) },
                     onDismissError = { viewModel.clearError() },
@@ -88,6 +95,8 @@ fun HomeScreen(
                     cameras = cameras,
                     error = null,
                     serviceReady = serviceReady,
+                    transport = transport,
+                    onTransportChange = { transport = it },
                     onScan = {},
                     onConnect = { viewModel.connect(it) },
                     onDismissError = {},
@@ -126,6 +135,9 @@ fun HomeScreen(
                     isScanning = false,
                     cameras = cameras,
                     error = error ?: "连接错误",
+                    serviceReady = serviceReady,
+                    transport = transport,
+                    onTransportChange = { transport = it },
                     onScan = { viewModel.scan() },
                     onConnect = { viewModel.connect(it) },
                     onDismissError = { viewModel.clearError() },
@@ -139,7 +151,7 @@ fun HomeScreen(
 
 @Composable
 private fun HomeTopBar(
-    connected: Boolean,
+    status: Int,
     model: String?,
     onDisconnect: () -> Unit,
 ) {
@@ -165,16 +177,14 @@ private fun HomeTopBar(
 
         Spacer(Modifier.weight(1f))
 
-        if (connected) {
-            Text(
-                text = model ?: "已连接",
-                fontSize = 11.sp,
-                color = NikonGreen,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.width(12.dp))
+        // 全局状态胶囊
+        StatusCapsule(status = status, modelName = model)
+
+        // 已连接时显示断开按钮
+        if (status == CameraBridge.STATUS_CONNECTED || status == CameraBridge.STATUS_TRANSFERRING) {
+            Spacer(Modifier.width(8.dp))
             TextButton(onClick = onDisconnect) {
-                Text("断开", color = NikonRed, fontSize = 13.sp)
+                Text("断开", color = NikonRed, fontSize = 12.sp)
             }
         }
     }
@@ -188,11 +198,12 @@ private fun ScanContent(
     cameras: List<CameraInfo>,
     error: String?,
     serviceReady: Boolean = true,
+    transport: Int = 0,
+    onTransportChange: (Int) -> Unit = {},
     onScan: () -> Unit,
     onConnect: (String) -> Unit,
     onDismissError: () -> Unit,
 ) {
-    var transport by remember { mutableStateOf(0) } // 0=USB 1=Wi-Fi 2=BLE
 
     Column(
         modifier = Modifier
@@ -265,7 +276,7 @@ private fun ScanContent(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { transport = idx },
+                        .clickable { onTransportChange(idx) },
                 ) {
                     Row(
                         Modifier.padding(vertical = 10.dp),
@@ -448,56 +459,87 @@ private fun ConnectingContent() {
 
 @Composable
 private fun ScanPulse(isScanning: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition()
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.2f,
+    // 旋转扫描弧动画
+    val sweepAngle by rememberInfiniteTransition(label = "sweep").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseInOutCubic),
-            repeatMode = RepeatMode.Reverse,
+            animation = tween(if (isScanning) 1200 else 4000, easing = LinearEasing),
         ),
+        label = "sweep_angle",
     )
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 0.15f,
+    // 脉冲环动画
+    val pulseScale by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.3f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseInOutCubic),
-            repeatMode = RepeatMode.Reverse,
+            animation = tween(1800, easing = EaseOut),
         ),
+        label = "pulse_scale",
+    )
+    val pulseAlpha by rememberInfiniteTransition(label = "pulse_a").animateFloat(
+        initialValue = 0.7f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = EaseOut),
+        ),
+        label = "pulse_alpha",
     )
 
     Box(
-        modifier = Modifier.size(120.dp),
+        modifier = Modifier.size(172.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // 外环
+        // 外环 (虚线旋转)
         Box(
             modifier = Modifier
-                .size(100.dp)
-                .scale(if (isScanning) scale else 1f)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            NikonYellow.copy(alpha = if (isScanning) alpha else 0.1f),
-                            NikonYellow.copy(alpha = 0f),
+                .size(172.dp)
+                .graphicsLayer { rotationZ = sweepAngle * 0.1f }
+                .border(
+                    width = 1.5.dp,
+                    brush = Brush.sweepGradient(
+                        listOf(
+                            Color(0x30F5B800),
+                            Color.Transparent,
+                            Color.Transparent,
+                            Color(0x10F5B800),
                         )
-                    )
+                    ),
+                    shape = CircleShape,
                 ),
         )
-
-        // 内圆
+        // 内环
         Box(
             modifier = Modifier
-                .size(64.dp)
+                .size(136.dp)
+                .border(1.dp, Color(0xFF252528), CircleShape),
+        )
+        // 脉冲环 (仅扫描时)
+        if (isScanning) {
+            Box(
+                modifier = Modifier
+                    .size(172.dp)
+                    .scale(pulseScale)
+                    .border(2.dp, NikonYellow.copy(alpha = pulseAlpha * 0.5f), CircleShape),
+            )
+        }
+        // 中心图标容器
+        Box(
+            modifier = Modifier
+                .size(72.dp)
                 .clip(CircleShape)
-                .background(NikonYellow.copy(alpha = 0.15f)),
+                .background(NikonSurface)
+                .border(
+                    2.dp,
+                    if (isScanning) NikonYellow.copy(alpha = 0.5f) else Color(0xFF2A2A2E),
+                    CircleShape,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Filled.CameraAlt,
                 contentDescription = null,
-                tint = NikonYellow,
+                tint = if (isScanning) NikonYellow else NikonText3,
                 modifier = Modifier.size(32.dp),
             )
         }

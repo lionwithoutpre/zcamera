@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.nikon.app.jni.CameraApi
 import com.nikon.app.jni.CameraBridge
 import com.nikon.app.jni.TransferProgressCallback
+import com.nikon.app.storage.StorageManager
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,6 +46,9 @@ class CameraViewModel(
      */
     private val app: com.nikon.app.NikonApplication get() = getApplication()
     private val _handle: Long get() = app.cameraHandle
+
+    /** 存储管理器: 传输完成后自动保存到系统相册 */
+    private val storageManager = StorageManager(application)
 
     /** Service 是否就绪(handle != 0) — UI 层据此守卫按钮 */
     private val _serviceReady = MutableStateFlow(false)
@@ -187,15 +191,19 @@ class CameraViewModel(
         if (!ensureHandle()) return
         viewModelScope.launch {
             _status.value = CameraBridge.STATUS_SCANNING
+            _cameras.value = emptyList()
+            // 保证扫描动画至少显示 3 秒,避免一闪而过
+            val scanStart = System.currentTimeMillis()
             val rawList = withContext(ioDispatcher) {
                 bridge.nativeScan(_handle) ?: emptyArray()
             }
+            val elapsed = System.currentTimeMillis() - scanStart
+            if (elapsed < 3000) {
+                delay(3000 - elapsed)
+            }
             val parsed = rawList.mapNotNull { CameraInfo.fromRaw(it) }
             _cameras.value = parsed
-            _status.value = if (parsed.isEmpty())
-                CameraBridge.STATUS_DISCONNECTED
-            else
-                CameraBridge.STATUS_DISCONNECTED  // 等用户选择后再连接
+            _status.value = CameraBridge.STATUS_DISCONNECTED
         }
     }
 
@@ -333,6 +341,16 @@ class CameraViewModel(
                 else                  -> "传输中"
             }
             updateJob(jobId) { it.copy(percent = percent, speedMbps = speedMbps, status = mappedStatus, note = note) }
+
+            // 完成时自动保存到系统相册
+            if (mappedStatus == TransferStatus.DONE) {
+                val job = _transferJobs.value.firstOrNull { it.id == jobId }
+                if (job != null) {
+                    viewModelScope.launch(ioDispatcher) {
+                        storageManager.saveToGallery(job.destPath, job.filename)
+                    }
+                }
+            }
 
             // 完成或失败时 promote 下一个
             if (mappedStatus == TransferStatus.DONE || mappedStatus == TransferStatus.FAILED) {

@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nikon Camera Connect — 交互重构 Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.cn" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.cn" crossorigin>
+<link href="https://fonts.googleapis.cn/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --yellow:#F5B800; --yellow-dim:rgba(245,184,0,.14);
+  --black:#0E0E0E; --surface:#1A1A1A; --surface2:#111111; --surface3:#262626;
+  --text:#F0F0F0; --text2:#A0A0A0; --text3:#616161;
+  --green:#4CAF50; --red:#E03A3A; --blue:#4A9EFF; --orange:#FF8A3D;
+  --disp:'Oswald','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;
+  --brand:'Bebas Neue','Oswald','Noto Sans SC',sans-serif;
+  --body:'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  --mono:'JetBrains Mono','SFMono-Regular','Cascadia Code',Consolas,'Noto Sans SC',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:var(--body); color:var(--text); background:#08080a;
+  background-image:
+    radial-gradient(1200px 800px at 78% -10%, rgba(245,184,0,.05), transparent 60%),
+    radial-gradient(900px 700px at -10% 110%, rgba(74,158,255,.04), transparent 60%),
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.018) 1px, transparent 1px);
+  background-size:auto,auto,26px 26px;
+  overflow-x:hidden; min-height:100vh;
+}
+::selection{background:var(--yellow);color:#000}
+
+/* ── 背景巨型光圈装饰 ── */
+.bg-aperture{position:fixed;right:-180px;top:-180px;width:640px;height:640px;opacity:.05;pointer-events:none;animation:slowspin 90s linear infinite;z-index:0}
+@keyframes slowspin{to{transform:rotate(360deg)}}
+
+/* ── 三栏布局 ── */
+.stage{position:relative;z-index:1;display:flex;gap:34px;align-items:stretch;justify-content:center;max-width:1460px;margin:0 auto;padding:34px 26px 60px;flex-wrap:wrap}
+.panel{width:300px;display:flex;flex-direction:column;gap:22px}
+.panel h2{font-family:var(--disp);font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--text3);font-weight:600;display:flex;align-items:center;gap:8px}
+.panel h2::before{content:"";width:16px;height:2px;background:var(--yellow)}
+.panel h2 .zh{letter-spacing:.05em;color:var(--text2)}
+
+/* ── 左侧:状态机说明 ── */
+.brandline{display:flex;align-items:baseline;gap:10px;margin-bottom:2px}
+.brandline .logo{width:30px;height:30px;background:var(--yellow);color:#000;font-family:var(--brand);font-weight:400;display:grid;place-items:center;border-radius:6px;font-size:21px;align-self:center}
+.brandline b{font-family:var(--brand);font-size:30px;letter-spacing:.05em;font-weight:400;line-height:.9}
+.brandline span{font-size:11px;color:var(--text3);letter-spacing:.14em}
+.intro{font-size:12.5px;line-height:1.75;color:var(--text2)}
+.intro em{color:var(--yellow);font-style:normal;font-weight:600}
+
+.sm{display:flex;flex-direction:column;gap:0;position:relative}
+.sm-node{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid #232326;border-radius:9px;background:#101013;transition:all .35s cubic-bezier(.2,.8,.3,1);position:relative;z-index:1}
+.sm-node .dot{width:9px;height:9px;border-radius:50%;background:#3a3a3f;flex:none;transition:all .35s}
+.sm-node .nm{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:.06em;color:var(--text3);transition:color .35s}
+.sm-node .ds{font-size:10.5px;color:var(--text3);margin-left:auto;text-align:right}
+.sm-node.on{border-color:rgba(245,184,0,.55);background:rgba(245,184,0,.07);transform:translateX(6px)}
+.sm-node.on .dot{background:var(--yellow);box-shadow:0 0 10px rgba(245,184,0,.8)}
+.sm-node.on .nm{color:var(--yellow)}
+.sm-node.on .ds{color:var(--text2)}
+.sm-arrow{height:16px;width:1px;background:#2a2a2e;margin-left:24px}
+.decisions{list-style:none;display:flex;flex-direction:column;gap:11px}
+.decisions li{font-size:12px;line-height:1.65;color:var(--text2);padding-left:16px;position:relative}
+.decisions li::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;background:var(--yellow);transform:rotate(45deg)}
+.decisions b{color:var(--text);font-weight:600}
+
+/* ── 右侧:检查器 ── */
+.readout{border:1px solid #232326;border-radius:12px;background:#101013;padding:18px 18px 15px;position:relative;overflow:hidden}
+.readout::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(245,184,0,.04),transparent 40%);pointer-events:none}
+.readout .lbl{font-size:10px;letter-spacing:.2em;color:var(--text3);text-transform:uppercase;font-family:var(--mono)}
+.readout .val{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:.02em;color:var(--yellow);margin-top:6px;transition:color .3s}
+.readout .sub{font-size:11px;color:var(--text2);margin-top:4px}
+.kv{display:flex;flex-direction:column;gap:0;border:1px solid #232326;border-radius:12px;overflow:hidden}
+.kv .row{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;font-size:12px;border-bottom:1px solid #1c1c20;background:#101013}
+.kv .row:last-child{border-bottom:none}
+.kv .row b{font-family:var(--mono);font-weight:600;color:var(--text)}
+.kv .row span{color:var(--text3)}
+.ctrls{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.cbtn{font-family:var(--body);font-size:12px;font-weight:600;padding:10px 8px;border-radius:9px;border:1px solid #2c2c30;background:#141417;color:var(--text2);cursor:pointer;transition:all .2s;text-align:center}
+.cbtn:hover{border-color:var(--yellow);color:var(--yellow);transform:translateY(-1px)}
+.cbtn.warn:hover{border-color:var(--red);color:var(--red)}
+.cbtn:active{transform:scale(.96)}
+.log{border:1px solid #232326;border-radius:12px;background:#0c0c0f;padding:12px;height:230px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;line-height:1.9}
+.log::-webkit-scrollbar{width:4px}.log::-webkit-scrollbar-thumb{background:#2c2c30;border-radius:2px}
+.log .ln{display:flex;gap:8px;animation:lnin .3s ease both}
+@keyframes lnin{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+.log .t{color:#4a4a50;flex:none}
+.log .m{color:var(--text2)}
+.log .m.y{color:var(--yellow)} .log .m.g{color:var(--green)} .log .m.r{color:var(--red)} .log .m.b{color:var(--blue)}
+
+/* ── 手机框 ── */
+.phone-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
+.phone{width:390px;height:844px;background:var(--black);border-radius:46px;border:1px solid #2a2a2e;box-shadow:0 40px 90px rgba(0,0,0,.65),0 0 0 10px #050506,0 0 0 11px #232327,0 0 80px rgba(245,184,0,.05);position:relative;overflow:hidden;display:flex;flex-direction:column}
+.notch{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:120px;height:26px;background:#000;border-radius:14px;z-index:60;border:1px solid #1a1a1c}
+.statusbar{height:44px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 5px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);z-index:55}
+.statusbar .ic{display:flex;gap:5px;align-items:center;font-size:10px;color:var(--text2)}
+
+/* 顶部栏 + 状态胶囊 */
+.topbar{flex:none;display:flex;align-items:center;gap:10px;padding:10px 20px 12px}
+.topbar .logo{width:27px;height:27px;background:var(--yellow);color:#000;font-family:var(--brand);font-weight:400;display:grid;place-items:center;border-radius:6px;font-size:19px}
+.topbar .ttl{font-family:var(--brand);font-weight:400;font-size:22px;letter-spacing:.04em}
+.capsule{margin-left:auto;display:flex;align-items:center;gap:7px;padding:5px 12px 5px 9px;border-radius:100px;background:var(--surface);border:1px solid #2a2a2c;font-size:11px;font-weight:600;color:var(--text2);transition:all .35s;white-space:nowrap}
+.capsule .cdot{width:7px;height:7px;border-radius:50%;background:#555;transition:all .35s;flex:none}
+.capsule[data-s="SCANNING"] .cdot,.capsule[data-s="CONNECTING"] .cdot{background:var(--yellow);animation:blink 1s ease infinite}
+.capsule[data-s="CONNECTED"]{border-color:rgba(76,175,80,.4);color:#cfe9d0}
+.capsule[data-s="CONNECTED"] .cdot{background:var(--green);box-shadow:0 0 8px rgba(76,175,80,.7)}
+.capsule[data-s="TRANSFERRING"]{border-color:rgba(245,184,0,.45);color:var(--yellow)}
+.capsule[data-s="TRANSFERRING"] .cdot{background:var(--yellow);animation:blink .7s ease infinite}
+.capsule[data-s="ERROR"]{border-color:rgba(224,58,58,.5);color:#f3c2c2}
+.capsule[data-s="ERROR"] .cdot{background:var(--red)}
+@keyframes blink{50%{opacity:.25}}
+
+/* 屏幕容器 */
+.screens{flex:1;position:relative;overflow:hidden}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;opacity:0;pointer-events:none;transform:translateX(14px);transition:opacity .28s ease,transform .28s cubic-bezier(.2,.8,.3,1)}
+.screen.on{opacity:1;pointer-events:auto;transform:none}
+.scroll{flex:1;overflow-y:auto;padding:0 20px 20px}
+.scroll::-webkit-scrollbar{width:0}
+
+/* 底部导航 */
+.nav{flex:none;height:76px;background:var(--surface2);border-top:1px solid #1e1e20;display:flex;padding:8px 8px 18px;z-index:90;position:relative}
+.nav button{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--text3);font-size:10px;font-weight:600;font-family:var(--body);cursor:pointer;position:relative;transition:color .25s}
+.nav button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;transition:transform .25s}
+.nav button.on{color:var(--yellow)}
+.nav button.on svg{transform:translateY(-1px)}
+.nav button.on::before{content:"";position:absolute;top:0;width:20px;height:2.5px;background:var(--yellow);border-radius:0 0 3px 3px}
+
+/* ── 主页:扫描雷达 ── */
+.aperture{width:172px;height:172px;margin:26px auto 6px;position:relative;display:grid;place-items:center}
+.aperture .ring{position:absolute;border-radius:50%}
+.aperture .r1{inset:0;border:1.5px dashed #2e2e32;animation:slowspin 50s linear infinite}
+.aperture .r2{inset:18px;border:1px solid #252528;animation:slowspin 70s linear infinite reverse}
+/* 旋转扫描弧 */
+.aperture .sweep{position:absolute;inset:6px;border-radius:50%;background:conic-gradient(from 0deg,transparent 0deg,rgba(245,184,0,.18) 40deg,transparent 80deg);animation:sweep 4s linear infinite;opacity:.4;transition:opacity .4s,animation-duration .4s}
+.aperture.scanning .sweep{opacity:1;animation-duration:1.2s}
+@keyframes sweep{to{transform:rotate(360deg)}}
+/* 中心图标容器 */
+.aperture .core{width:72px;height:72px;border-radius:50%;background:var(--surface);border:2px solid #2a2a2e;display:grid;place-items:center;position:relative;z-index:2;transition:border-color .4s,box-shadow .4s}
+.aperture .core svg{width:32px;height:32px;stroke:var(--text3);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transition:stroke .4s}
+.aperture.scanning .core{border-color:rgba(245,184,0,.5);box-shadow:0 0 28px rgba(245,184,0,.15)}
+.aperture.scanning .core svg{stroke:var(--yellow)}
+/* 脉冲环 */
+.aperture .pulse{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(245,184,0,.45);opacity:0}
+.aperture.scanning .pulse{animation:radar 1.8s ease-out infinite}
+.aperture .pulse.p2{animation-delay:.9s}
+@keyframes radar{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.3);opacity:0}}
+
+.scan-title{text-align:center;font-family:var(--disp);font-weight:700;font-size:20px;letter-spacing:.06em;min-height:26px}
+.scan-sub{text-align:center;font-size:12px;color:var(--text2);margin-top:5px;min-height:18px;font-family:var(--mono)}
+.scan-sub .step{color:var(--yellow)}
+
+.seg-label{font-size:10px;letter-spacing:.2em;color:var(--text3);font-weight:700;margin:22px 0 9px}
+.seg{display:flex;gap:8px}
+.seg button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 0;border-radius:10px;border:none;background:var(--surface);color:var(--text);font-size:12.5px;font-weight:700;font-family:var(--body);cursor:pointer;transition:all .25s}
+.seg button svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.seg button.on{background:var(--yellow);color:#000;box-shadow:0 4px 16px rgba(245,184,0,.3)}
+.seg button:active{transform:scale(.96)}
+
+.ble-tip{margin-top:16px;background:rgba(245,184,0,.045);border:1px solid rgba(245,184,0,.2);border-radius:12px;padding:12px 14px;display:flex;gap:10px}
+.ble-tip svg{width:16px;height:16px;stroke:var(--yellow);fill:none;stroke-width:2;flex:none;margin-top:2px}
+.ble-tip b{font-size:12px;color:var(--yellow);display:block;margin-bottom:3px}
+.ble-tip p{font-size:11px;color:var(--text2);line-height:1.6}
+
+.bigbtn{width:100%;margin-top:22px;height:50px;border-radius:13px;border:none;background:var(--yellow);color:#000;font-size:15.5px;font-weight:700;font-family:var(--body);cursor:pointer;transition:all .2s;box-shadow:0 6px 22px rgba(245,184,0,.28);position:relative;overflow:hidden}
+.bigbtn:hover{filter:brightness(1.07)}
+.bigbtn:active{transform:scale(.97)}
+.bigbtn:disabled{background:rgba(245,184,0,.28);color:rgba(0,0,0,.5);box-shadow:none;cursor:not-allowed}
+.bigbtn .spin{display:none;width:16px;height:16px;border:2.5px solid rgba(0,0,0,.25);border-top-color:#000;border-radius:50%;animation:rot .7s linear infinite;vertical-align:-3px;margin-right:8px}
+.bigbtn.loading .spin{display:inline-block}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+.dev-head{display:flex;align-items:center;justify-content:space-between;margin:26px 0 10px}
+.dev-head b{font-size:12px;letter-spacing:.14em;color:var(--text3);font-weight:700}
+.dev-head span{font-size:11px;color:var(--yellow);font-family:var(--mono)}
+.dev-card{background:var(--surface);border-radius:14px;padding:15px 16px;display:flex;align-items:center;gap:12px;margin-bottom:10px;cursor:pointer;border:1px solid transparent;transition:all .25s;animation:cardin .5s cubic-bezier(.2,.8,.3,1) both}
+.dev-card:hover{border-color:rgba(245,184,0,.4);transform:translateY(-2px)}
+.dev-card:active{transform:scale(.98)}
+@keyframes cardin{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.dev-card .ic{width:42px;height:42px;border-radius:11px;background:var(--yellow-dim);display:grid;place-items:center;flex:none}
+.dev-card .ic svg{width:22px;height:22px;stroke:var(--yellow);fill:none;stroke-width:1.7}
+.dev-card .inf{flex:1;min-width:0}
+.dev-card .md{font-weight:700;font-size:15px}
+.dev-card .mt{display:flex;gap:10px;margin-top:4px;font-size:11px;color:var(--text3);font-family:var(--mono)}
+.dev-card .mt .tag{color:var(--blue)}
+.dev-card .bat{display:flex;align-items:center;gap:7px}
+.batbar{width:26px;height:12px;border:1.5px solid #4a4a4e;border-radius:3px;padding:1.5px;position:relative}
+.batbar::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;background:#4a4a4e;border-radius:1px}
+.batbar i{display:block;height:100%;background:var(--green);border-radius:1px}
+.dev-card .chev{color:var(--text3);font-size:18px}
+
+/* 错误横幅 */
+.errbanner{background:rgba(224,58,58,.08);border:1px solid rgba(224,58,58,.35);border-radius:12px;padding:13px 14px;display:flex;gap:10px;margin-bottom:16px;animation:cardin .4s ease both}
+.errbanner .ei{color:var(--red);font-size:17px;flex:none}
+.errbanner b{font-size:13px;color:var(--red);display:block}
+.errbanner p{font-size:11px;color:var(--text2);margin-top:2px;font-family:var(--mono)}
+.errbanner .acts{margin-left:auto;display:flex;flex-direction:column;gap:2px;flex:none}
+.errbanner .acts button{background:none;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--body)}
+.errbanner .acts .rt{color:var(--yellow)} .errbanner .acts .cl{color:var(--text3)}
+
+/* 空态 */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 20px;text-align:center;animation:cardin .4s ease both}
+.empty .eic{width:64px;height:64px;border-radius:50%;background:var(--surface);display:grid;place-items:center;margin-bottom:16px}
+.empty .eic svg{width:28px;height:28px;stroke:var(--text3);fill:none;stroke-width:1.7}
+.empty b{font-size:15px;font-weight:700;color:var(--text2)}
+.empty p{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.7}
+.empty .go{margin-top:18px;background:var(--yellow);color:#000;border:none;border-radius:10px;padding:10px 26px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--body);transition:transform .2s}
+.empty .go:active{transform:scale(.95)}
+
+/* ── 仪表盘 ── */
+.dash-card{background:var(--surface);border-radius:16px;padding:18px;position:relative;overflow:hidden}
+.dash-card::after{content:"Z8";position:absolute;right:-8px;bottom:-26px;font-family:var(--disp);font-size:96px;font-weight:700;color:rgba(255,255,255,.03);letter-spacing:-.02em}
+.dash-card .top{display:flex;align-items:flex-start;gap:10px}
+.dash-card .md{font-family:var(--brand);font-weight:400;font-size:31px;letter-spacing:.03em;line-height:.95}
+.dash-card .sn{font-size:11px;color:var(--text3);font-family:var(--mono);margin-top:3px}
+.livedot{margin-left:auto;width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(76,175,80,.7);animation:blink 2s ease infinite}
+.dash-card .row2{display:flex;justify-content:space-between;margin-top:16px}
+.dash-card .cellbl{font-size:10px;color:var(--text3);letter-spacing:.1em}
+.dash-card .big{font-family:var(--mono);font-weight:700;font-size:17px;margin-top:5px}
+.storebar{height:4px;background:var(--surface3);border-radius:2px;margin-top:14px;overflow:hidden}
+.storebar i{display:block;height:100%;width:38%;background:var(--yellow);border-radius:2px}
+.sec-head{display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px}
+.sec-head b{font-size:11px;letter-spacing:.16em;color:var(--text3);font-weight:700}
+.sec-head .sync{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--yellow)}
+.sec-head .sync i{width:5px;height:5px;border-radius:50%;background:var(--yellow);animation:blink 1.2s ease infinite}
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pcell{background:var(--surface);border-radius:10px;padding:12px 6px;text-align:center;position:relative}
+.pcell .pl{font-size:10px;color:var(--text3)}
+.pcell .pv{font-family:var(--mono);font-weight:700;font-size:15px;margin-top:4px;transition:color .3s}
+.pcell.hl .pv{color:var(--yellow)}
+.pcell.flash .pv{color:var(--yellow);text-shadow:0 0 12px rgba(245,184,0,.6)}
+.pcell .pd{position:absolute;top:6px;right:7px;width:4px;height:4px;border-radius:50%;background:var(--yellow)}
+.qgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.qbtn{background:var(--surface);border:1px solid transparent;border-radius:14px;padding:16px 10px;display:flex;flex-direction:column;align-items:center;gap:7px;cursor:pointer;transition:all .2s;font-family:var(--body)}
+.qbtn svg{width:23px;height:23px;fill:none;stroke-width:1.8}
+.qbtn span{font-size:12px;font-weight:600;color:var(--text)}
+.qbtn:hover{transform:translateY(-2px);border-color:rgba(245,184,0,.35)}
+.qbtn:active{transform:scale(.96)}
+.qbtn.ghost{background:rgba(245,184,0,.07);border-color:rgba(245,184,0,.4)}
+.autorow{margin-top:14px;background:var(--surface);border-radius:12px;padding:13px 15px;display:flex;align-items:center;gap:12px}
+.autorow .aic{width:31px;height:31px;border-radius:50%;background:var(--yellow-dim);display:grid;place-items:center;color:var(--yellow);font-size:15px;flex:none}
+.autorow b{font-size:13px;display:block}
+.autorow p{font-size:10.5px;color:var(--text3);margin-top:2px}
+.switch{margin-left:auto;width:44px;height:25px;border-radius:100px;background:var(--surface3);position:relative;cursor:pointer;transition:background .3s;flex:none}
+.switch i{position:absolute;top:3px;left:3px;width:19px;height:19px;border-radius:50%;background:var(--text3);transition:all .3s cubic-bezier(.2,.8,.3,1)}
+.switch.on{background:var(--yellow)}
+.switch.on i{left:22px;background:#000}
+
+/* ── 相册 ── */
+.gal-top{display:flex;align-items:center;gap:10px;padding:4px 0 12px}
+.gal-top b{font-family:var(--disp);font-weight:700;font-size:19px;letter-spacing:.05em}
+.cardtabs{margin-left:auto;display:flex;background:var(--surface);border-radius:9px;padding:3px;gap:2px}
+.cardtabs button{border:none;background:none;color:var(--text3);font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;cursor:pointer;font-family:var(--mono);transition:all .25s}
+.cardtabs button.on{background:var(--yellow);color:#000}
+.viewtog{width:32px;height:32px;border-radius:9px;background:var(--surface);border:none;color:var(--text2);display:grid;place-items:center;cursor:pointer}
+.viewtog svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
+.chips{display:flex;gap:7px;overflow-x:auto;padding-bottom:12px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:none;border-radius:100px;padding:6px 14px;font-size:11px;font-weight:700;background:var(--surface);color:var(--text2);cursor:pointer;font-family:var(--body);transition:all .25s}
+.chip.on{background:var(--yellow);color:#000}
+.gal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.gal-grid .dgroup{grid-column:1/-1;font-size:10.5px;color:var(--text3);font-family:var(--mono);margin:8px 0 2px;letter-spacing:.08em}
+.thumb{aspect-ratio:1;border-radius:7px;position:relative;overflow:hidden;cursor:pointer;transition:transform .2s}
+.thumb .ph{position:absolute;inset:0;background:linear-gradient(165deg,#31406b 0%,#5a3a52 42%,#c96f3f 72%,#f0a848 100%)}
+.thumb .ph::before{content:"";position:absolute;width:26%;height:26%;left:62%;top:16%;border-radius:50%;background:radial-gradient(circle,#ffe9b0,rgba(245,184,0,.55) 55%,transparent 75%)}
+.thumb .ph::after{content:"";position:absolute;left:0;right:0;bottom:0;height:58%;background:#0c0b12;clip-path:polygon(0 62%,16% 22%,32% 56%,50% 12%,68% 52%,84% 26%,100% 58%,100% 100%,0 100%)}
+.thumb:hover{transform:scale(1.03)}
+.thumb .sel{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;border:2px solid rgba(255,255,255,.75);background:rgba(0,0,0,.35);display:grid;place-items:center;font-size:11px;color:transparent;transition:all .2s;z-index:2}
+.thumb.picked .sel{background:var(--yellow);border-color:var(--yellow);color:#000}
+.thumb .fmt{position:absolute;left:6px;bottom:6px;font-size:8.5px;font-weight:700;font-family:var(--mono);background:rgba(0,0,0,.6);color:var(--yellow);padding:2px 5px;border-radius:4px;z-index:2}
+.thumb .done{position:absolute;left:6px;top:6px;font-size:10px;color:var(--green);z-index:2;text-shadow:0 0 4px #000}
+.gal-stat{display:flex;justify-content:space-around;background:var(--surface2);border:1px solid #1e1e20;border-radius:12px;padding:11px;margin-top:14px;font-size:11px;color:var(--text3)}
+.gal-stat b{color:var(--text);font-family:var(--mono)}
+.multibar{position:absolute;left:14px;right:14px;bottom:14px;background:var(--surface);border:1px solid rgba(245,184,0,.4);border-radius:14px;padding:11px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 12px 34px rgba(0,0,0,.6);z-index:40;animation:barin .3s cubic-bezier(.2,.8,.3,1) both}
+@keyframes barin{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+.multibar b{font-size:13px;color:var(--yellow);font-family:var(--mono)}
+.multibar .mb{margin-left:auto;display:flex;gap:8px}
+.multibar button{border:none;border-radius:8px;padding:8px 15px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--body)}
+.multibar .tr{background:var(--yellow);color:#000}
+.multibar .ca{background:var(--surface3);color:var(--text2)}
+
+/* ── 传输 ── */
+.gauge{background:var(--surface);border-radius:16px;padding:18px;display:flex;align-items:center;gap:18px;position:relative;overflow:hidden}
+.gauge svg{width:98px;height:98px;flex:none;transform:rotate(-90deg)}
+.gauge .spd{font-family:var(--mono);font-weight:700;font-size:27px;color:var(--yellow)}
+.gauge .spdu{font-size:11px;color:var(--text3)}
+.gauge .gmeta{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--text2)}
+.gauge .gmeta b{color:var(--text);font-family:var(--mono)}
+.tsec{font-size:11.5px;font-weight:700;letter-spacing:.1em;color:var(--text3);margin:18px 0 9px;display:flex;align-items:center;gap:6px}
+.tsec .cnt{color:var(--yellow);font-family:var(--mono)}
+.tjob{background:var(--surface);border-radius:13px;padding:13px 15px;margin-bottom:9px;animation:cardin .4s ease both}
+.tjob .tr1{display:flex;align-items:center;gap:9px}
+.tjob .fic{width:34px;height:34px;border-radius:9px;background:var(--yellow-dim);display:grid;place-items:center;font-size:9px;font-weight:700;color:var(--yellow);font-family:var(--mono);flex:none}
+.tjob .fn{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tjob .pc{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--yellow)}
+.tjob .pbar{height:4px;background:var(--surface3);border-radius:2px;margin-top:10px;overflow:hidden}
+.tjob .pbar i{display:block;height:100%;background:var(--yellow);border-radius:2px;transition:width .4s ease}
+.tjob .tr2{display:flex;justify-content:space-between;margin-top:7px;font-size:10.5px;color:var(--text3);font-family:var(--mono)}
+.tjob.done .pc{color:var(--green)}
+.tjob.done .pbar i{background:var(--green)}
+.tjob.fail .pc{color:var(--red)}
+.tjob.fail .pbar i{background:var(--red)}
+.tjob .rbtns{display:flex;gap:7px;margin-top:9px}
+.tjob .rbtns button{border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--body)}
+.tjob .rbtns .rs{background:var(--yellow-dim);color:var(--yellow)}
+.tjob .rbtns .rt{background:var(--surface3);color:var(--text2)}
+
+/* ── 预设 ── */
+.tipbar{background:rgba(245,184,0,.06);border:1px solid rgba(245,184,0,.22);border-radius:11px;padding:11px 13px;display:flex;gap:9px;align-items:center;font-size:11.5px;color:var(--text2);margin-bottom:14px;animation:cardin .4s ease both}
+.tipbar i{color:var(--yellow);font-style:normal;font-size:14px;flex:none}
+.preset{background:var(--surface);border-radius:14px;margin-bottom:11px;overflow:hidden;border:1px solid transparent;transition:border-color .3s}
+.preset.act{border-color:rgba(245,184,0,.4)}
+.preset .ph{padding:15px 16px;display:flex;align-items:center;gap:11px;cursor:pointer}
+.preset .sw{width:38px;height:38px;border-radius:10px;flex:none;background:linear-gradient(135deg,#c98a2e,#5a3a52)}
+.preset .pn{font-weight:700;font-size:14.5px}
+.preset .pd2{font-size:11px;color:var(--text3);margin-top:3px}
+.preset .apply{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--yellow);border:1px solid rgba(245,184,0,.4);border-radius:100px;padding:5px 12px;background:none;cursor:pointer;font-family:var(--body);transition:all .25s;flex:none}
+.preset .apply:disabled{color:var(--text3);border-color:#333;cursor:not-allowed}
+.preset .apply.ok{background:var(--green);border-color:var(--green);color:#000}
+.preset .chev2{color:var(--text3);transition:transform .3s;flex:none}
+.preset.open .chev2{transform:rotate(180deg)}
+.preset .pb{max-height:0;overflow:hidden;transition:max-height .4s cubic-bezier(.2,.8,.3,1)}
+.preset.open .pb{max-height:420px}
+.preset .pbi{padding:4px 16px 16px}
+.sld{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.sld .sl{font-size:11px;color:var(--text2);width:44px;flex:none}
+.sld input{flex:1;-webkit-appearance:none;height:3px;border-radius:2px;background:var(--surface3);outline:none}
+.sld input::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--yellow);cursor:pointer;box-shadow:0 0 8px rgba(245,184,0,.5)}
+.sld .sv{font-family:var(--mono);font-size:11px;color:var(--yellow);width:34px;text-align:right;flex:none}
+
+/* ── 设置 ── */
+.setcard{background:var(--surface);border-radius:14px;padding:16px;margin-bottom:12px}
+.setcard .st{font-size:11px;letter-spacing:.14em;color:var(--text3);font-weight:700;margin-bottom:12px}
+.setrow{display:flex;align-items:center;justify-content:space-between;padding:9px 0;font-size:13px;border-bottom:1px solid #212124;cursor:pointer;transition:background .2s;border-radius:4px}
+.setrow:hover{background:rgba(255,255,255,.03)}
+.setrow:active{background:rgba(245,184,0,.06)}
+.setrow:last-child{border-bottom:none}
+.setrow .sv2{color:var(--text3);font-size:12px;font-family:var(--mono)}
+
+/* ── LiveView ── */
+.lv{position:absolute;inset:0;background:#000;z-index:80;display:none;flex-direction:column}
+.lv.on{display:flex;animation:lvin .35s ease both}
+@keyframes lvin{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:none}}
+.lv-scene{position:absolute;inset:0;animation:handheld 5s ease-in-out infinite}
+@keyframes handheld{0%,100%{transform:translate(0,0)}25%{transform:translate(-2px,1.5px)}50%{transform:translate(1.5px,-2px)}75%{transform:translate(-1px,-1px)}}
+.lv-scene .cloud{animation:drift 14s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translateX(26px)}}
+.lv-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.lv-flash.go{animation:flash .32s ease-out}
+@keyframes flash{0%{opacity:.95}100%{opacity:0}}
+.lv-grid{position:absolute;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.13) 1px,transparent 1px);background-size:33.4% 33.4%}
+.lv-focus{position:absolute;width:76px;height:76px;left:50%;top:44%;transform:translate(-50%,-50%);pointer-events:none;transition:left .3s cubic-bezier(.2,.8,.3,1),top .3s cubic-bezier(.2,.8,.3,1)}
+.lv-focus i{position:absolute;width:16px;height:16px;border:2.5px solid var(--yellow);transition:all .3s}
+.lv-focus i:nth-child(1){left:0;top:0;border-right:none;border-bottom:none}
+.lv-focus i:nth-child(2){right:0;top:0;border-left:none;border-bottom:none}
+.lv-focus i:nth-child(3){left:0;bottom:0;border-right:none;border-top:none}
+.lv-focus i:nth-child(4){right:0;bottom:0;border-left:none;border-top:none}
+.lv-focus.lock i{width:11px;height:11px;border-color:var(--green)}
+.lv-top{position:relative;z-index:5;display:flex;align-items:center;gap:10px;padding:16px 16px 0}
+.lv-back{width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.14);display:grid;place-items:center;cursor:pointer}
+.lv-back svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:2.2}
+.lv-rec{margin-left:auto;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:6px 11px;font-size:11px;font-weight:700;font-family:var(--mono);color:#fff}
+.lv-rec .rdot{width:7px;height:7px;border-radius:50%;background:var(--red);animation:blink 1s ease infinite}
+.lv-bat{font-size:11px;font-weight:700;font-family:var(--mono);color:#fff}
+.lv-hist{position:absolute;right:14px;top:74px;width:82px;height:44px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);border-radius:7px;display:flex;align-items:flex-end;gap:2px;padding:5px;z-index:5}
+.lv-hist b{flex:1;background:rgba(245,184,0,.75);border-radius:1px 1px 0 0;animation:hist 1.4s ease-in-out infinite alternate}
+@keyframes hist{to{transform:scaleY(.55)}}
+.lv-zoom{position:absolute;right:14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:7px;z-index:5}
+.lv-zoom button{width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.14);color:#fff;font-size:16px;cursor:pointer}
+.lv-zoom span{font-size:10.5px;font-family:var(--mono);color:#fff;background:rgba(0,0,0,.55);padding:3px 7px;border-radius:6px}
+.lv-bottom{position:relative;z-index:5;margin-top:auto;padding:0 16px 26px;overflow:visible}
+.lv-af{display:flex;justify-content:center;gap:4px;background:rgba(0,0,0,.5);border-radius:100px;padding:4px;width:max-content;margin:0 auto 14px}
+.lv-af button{border:none;background:none;color:rgba(255,255,255,.6);font-size:11.5px;font-weight:700;padding:6px 17px;border-radius:100px;cursor:pointer;font-family:var(--mono);transition:all .25s}
+.lv-af button.on{background:var(--yellow);color:#000}
+.lv-params{display:flex;justify-content:space-around;margin-bottom:16px;position:relative}
+.lv-params .lp{text-align:center;cursor:pointer;padding:5px 9px;border-radius:8px;transition:background .2s;position:relative}
+.lv-params .lp:hover{background:rgba(255,255,255,.08)}
+.lv-params .lp.active{background:rgba(245,184,0,.12);border:1px solid rgba(245,184,0,.4)}
+.lv-params .lk{font-size:9px;color:rgba(255,255,255,.5);letter-spacing:.1em}
+.lv-params .lv2{font-family:var(--mono);font-weight:700;font-size:15px;color:#fff;margin-top:2px}
+/* 参数刻度尺(手机相机风格) */
+.lv-ruler{height:52px;display:flex;align-items:center;overflow:hidden;margin:0 -16px 10px;padding:0 16px;animation:rulerin .25s cubic-bezier(.2,.8,.3,1) both;background:rgba(10,10,12,.88);border-radius:10px;border:1px solid rgba(245,184,0,.2);position:relative}
+@keyframes rulerin{from{opacity:0;max-height:0;margin-bottom:0}to{opacity:1;max-height:52px;margin-bottom:10px}}
+.lv-ruler::before,.lv-ruler::after{content:"";position:absolute;top:0;bottom:0;width:32px;z-index:2;pointer-events:none}
+.lv-ruler::before{left:16px;background:linear-gradient(90deg,rgba(10,10,12,.95),transparent)}
+.lv-ruler::after{right:16px;background:linear-gradient(-90deg,rgba(10,10,12,.95),transparent)}
+.lv-ruler .track{display:flex;align-items:center;gap:0;padding:0 calc(50% - 24px);overflow-x:auto;scrollbar-width:none;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;cursor:grab;touch-action:pan-x;width:100%}
+.lv-ruler .track:active{cursor:grabbing}
+.lv-ruler .track::-webkit-scrollbar{display:none}
+.lv-ruler .tick{flex:none;width:48px;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;transition:all .2s}
+.lv-ruler .tick::before{content:"";position:absolute;top:8px;width:1px;height:10px;background:rgba(255,255,255,.2);transition:all .2s}
+.lv-ruler .tick.on::before{height:16px;background:var(--yellow);width:2px;top:4px}
+.lv-ruler .tick .tv{font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.45);transition:all .2s;margin-top:14px}
+.lv-ruler .tick.on .tv{font-size:14px;font-weight:700;color:var(--yellow);text-shadow:0 0 8px rgba(245,184,0,.4)}
+.lv-ruler .indicator{position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--yellow);transform:translateX(-50%);border-radius:1px;box-shadow:0 0 6px rgba(245,184,0,.5);z-index:3;pointer-events:none}
+.lv-ruler .rlabel{position:absolute;left:50%;top:2px;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(255,255,255,.35);font-weight:700;z-index:3;pointer-events:none}
+.lv-shutterrow{display:flex;align-items:center;justify-content:space-between;padding:0 26px}
+.lv-count{font-size:11px;font-family:var(--mono);color:rgba(255,255,255,.7);width:60px}
+.shutter{width:72px;height:72px;border-radius:50%;border:4px solid #fff;background:transparent;cursor:pointer;display:grid;place-items:center;transition:transform .15s}
+.shutter i{width:56px;height:56px;border-radius:50%;background:#fff;transition:all .15s;display:block}
+.shutter:active{transform:scale(.92)}
+.shutter:active i{background:var(--yellow)}
+.lv-gal{width:44px;height:44px;border-radius:11px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);display:grid;place-items:center;cursor:pointer}
+.lv-gal svg{width:19px;height:19px;stroke:#fff;fill:none;stroke-width:1.8}
+
+/* Snackbar */
+.snack{position:absolute;left:16px;right:16px;bottom:92px;background:var(--surface);border:1px solid #2c2c30;border-left:3px solid var(--yellow);border-radius:11px;padding:12px 15px;font-size:12.5px;color:var(--text);z-index:90;opacity:0;transform:translateY(16px);transition:all .35s cubic-bezier(.2,.8,.3,1);pointer-events:none;box-shadow:0 12px 34px rgba(0,0,0,.55)}
+.snack.on{opacity:1;transform:none}
+.snack.err{border-left-color:var(--red)}
+</style>
+</head>
+<body>
+
+<svg class="bg-aperture" viewBox="0 0 200 200"><g fill="none" stroke="#F5B800" stroke-width="1"><circle cx="100" cy="100" r="96"/><circle cx="100" cy="100" r="70"/><path d="M100 4 A96 96 0 0 1 183 52 L100 100 Z M183 52 A96 96 0 0 1 183 148 L100 100 Z M183 148 A96 96 0 0 1 100 196 L100 100 Z M100 196 A96 96 0 0 1 17 148 L100 100 Z M17 148 A96 96 0 0 1 17 52 L100 100 Z M17 52 A96 96 0 0 1 100 4 L100 100 Z"/></g></svg>
+
+<div class="stage">
+
+  <!-- ════ 左侧:设计说明 ════ -->
+  <aside class="panel">
+    <div>
+      <div class="brandline"><span class="logo">N</span><b>NIKON CONNECT</b><span>REDESIGN</span></div>
+      <p class="intro">以<em>全局连接状态机</em>为核心的交互重构。六个状态驱动所有页面的空态、加载与错误语言，顶部状态胶囊实时反馈，杜绝各页面各自为政。</p>
+    </div>
+    <div>
+      <h2>STATE MACHINE <span class="zh">· 状态机</span></h2>
+      <div class="sm" id="sm" style="margin-top:14px">
+        <div class="sm-node" data-s="DISCONNECTED"><span class="dot"></span><span class="nm">DISCONNECTED</span><span class="ds">未连接 · 空态</span></div>
+        <div class="sm-arrow"></div>
+        <div class="sm-node" data-s="SCANNING"><span class="dot"></span><span class="nm">SCANNING</span><span class="ds">扫描 · ≥3s</span></div>
+        <div class="sm-arrow"></div>
+        <div class="sm-node" data-s="CONNECTING"><span class="dot"></span><span class="nm">CONNECTING</span><span class="ds">建立 PTP 会话</span></div>
+        <div class="sm-arrow"></div>
+        <div class="sm-node" data-s="CONNECTED"><span class="dot"></span><span class="nm">CONNECTED</span><span class="ds">仪表盘 · 实时参数</span></div>
+        <div class="sm-arrow"></div>
+        <div class="sm-node" data-s="TRANSFERRING"><span class="dot"></span><span class="nm">TRANSFERRING</span><span class="ds">边拍边传</span></div>
+        <div class="sm-arrow"></div>
+        <div class="sm-node" data-s="ERROR"><span class="dot"></span><span class="nm">ERROR</span><span class="ds">错误横幅 · 重试</span></div>
+      </div>
+    </div>
+    <div>
+      <h2>KEY DECISIONS <span class="zh">· 关键决策</span></h2>
+      <ul class="decisions" style="margin-top:14px">
+        <li><b>状态胶囊常驻顶栏</b>，颜色与脉冲随状态实时变化，是唯一全局真源。</li>
+        <li><b>扫描至少持续 3 秒</b>并显示分步文案，避免结果一闪而过。</li>
+        <li><b>连接方式选择被记忆</b>，扫描往返不会自动跳回 USB。</li>
+        <li><b>统一空态语言</b>：图标 + 一句话 + 引导按钮，断开自动全局回落。</li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- ════ 中间:手机 ════ -->
+  <div class="phone-wrap">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="statusbar"><span id="clock">10:24</span><span class="ic">5G ▮▮▮ 82%</span></div>
+      <div class="topbar">
+        <span class="logo">N</span><span class="ttl">Nikon Connect</span>
+        <span class="capsule" id="capsule" data-s="DISCONNECTED"><span class="cdot"></span><span id="capText">未连接</span></span>
+      </div>
+
+      <div class="screens" id="screens">
+
+        <!-- ── 主页 ── -->
+        <div class="screen on" data-scr="home">
+          <div class="scroll">
+            <div id="homeScan">
+              <div id="errSlot"></div>
+              <div class="aperture" id="aperture">
+                <span class="ring r1"></span><span class="ring r2"></span>
+                <span class="sweep"></span>
+                <span class="pulse"></span><span class="pulse p2"></span>
+                <span class="core"><svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/><path d="M12 9.5v0"/></svg></span>
+              </div>
+              <div class="scan-title" id="scanTitle">未发现尼康设备</div>
+              <div class="scan-sub" id="scanSub">连接相机后选择连接方式</div>
+
+              <div class="seg-label">连接方式 · CONNECTION</div>
+              <div class="seg" id="seg">
+                <button data-t="0" class="on"><svg viewBox="0 0 24 24"><path d="M12 3v14m0 0l-4-4m4 4l4-4M8 21h8"/></svg>USB</button>
+                <button data-t="1"><svg viewBox="0 0 24 24"><path d="M2 9c5.5-5 14.5-5 20 0M5 12.5c4-3.5 10-3.5 14 0M8.5 16c2-1.8 5-1.8 7 0M12 19.5h.01"/></svg>Wi-Fi</button>
+                <button data-t="2"><svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>蓝牙</button>
+              </div>
+
+              <div class="ble-tip">
+                <svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>
+                <div><b>蓝牙 BLE 唤醒</b><p>相机休眠时可用蓝牙唤醒并自动切换至 USB / Wi-Fi。需在相机菜单启用「通过蓝牙遥控」。</p></div>
+              </div>
+
+              <button class="bigbtn" id="scanBtn"><span class="spin"></span><span id="scanBtnTxt">扫描设备</span></button>
+
+              <div id="devList"></div>
+            </div>
+
+            <div id="homeDash" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- ── 相册 ── -->
+        <div class="screen" data-scr="gallery">
+          <div class="scroll" id="galScroll"></div>
+        </div>
+
+        <!-- ── 传输 ── -->
+        <div class="screen" data-scr="transfer">
+          <div class="scroll" id="tfScroll"></div>
+        </div>
+
+        <!-- ── 预设 ── -->
+        <div class="screen" data-scr="preset">
+          <div class="scroll" id="psScroll"></div>
+        </div>
+
+        <!-- ── 设置 ── -->
+        <div class="screen" data-scr="settings">
+          <div class="scroll" id="stScroll"></div>
+        </div>
+
+        <!-- ── LiveView 全屏 ── -->
+        <div class="lv" id="lv">
+          <div class="lv-scene" id="lvScene">
+            <svg viewBox="0 0 390 700" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+              <defs>
+                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a2340"/><stop offset=".45" stop-color="#5a3a52"/><stop offset=".72" stop-color="#c96f3f"/><stop offset="1" stop-color="#f0a848"/></linearGradient>
+                <radialGradient id="sun" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffe9b0"/><stop offset=".4" stop-color="#f5b800" stop-opacity=".85"/><stop offset="1" stop-color="#f5b800" stop-opacity="0"/></radialGradient>
+              </defs>
+              <rect width="390" height="700" fill="url(#sky)"/>
+              <circle cx="255" cy="330" r="95" fill="url(#sun)"/>
+              <circle cx="255" cy="330" r="34" fill="#ffe3a1"/>
+              <g fill="#232030" opacity=".55"><path d="M0 420 L90 300 L170 400 L230 330 L320 430 L390 380 V700 H0 Z"/></g>
+              <g fill="#15131d"><path d="M0 480 L70 390 L150 470 L240 380 L330 470 L390 430 V700 H0 Z"/></g>
+              <g fill="#0c0b12"><path d="M0 560 L120 480 L260 560 L390 500 V700 H0 Z"/></g>
+              <g stroke="#0c0b12" stroke-width="2.4" fill="none" opacity=".8"><path d="M90 250 q8 -9 16 0 q8 -9 16 0"/><path d="M140 220 q6 -7 12 0 q6 -7 12 0"/></g>
+              <g class="cloud" fill="#f0c070" opacity=".16"><ellipse cx="90" cy="300" rx="70" ry="9"/><ellipse cx="300" cy="260" rx="55" ry="7"/></g>
+            </svg>
+            <div class="lv-flash" id="lvFlash"></div>
+          </div>
+          <div class="lv-grid"></div>
+          <div class="lv-focus" id="lvFocus"><i></i><i></i><i></i><i></i></div>
+          <div class="lv-top">
+            <button class="lv-back" id="lvBack"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <span class="lv-rec" id="lvRec"><span class="rdot"></span>LV · 30fps</span>
+            <span class="lv-bat" id="lvBat">82%</span>
+          </div>
+          <div class="lv-hist" id="lvHist"></div>
+          <div class="lv-zoom"><button id="zIn">+</button><span id="zVal">1.0×</span><button id="zOut">−</button></div>
+          <div class="lv-bottom">
+            <div class="lv-af" id="lvAf"><button class="on">AF-C</button><button>AF-S</button><button>MF</button></div>
+            <div class="lv-params" id="lvParams"></div>
+            <div class="lv-shutterrow">
+              <div class="lv-count" id="lvCount">连拍 0</div>
+              <button class="shutter" id="shutter"><i></i></button>
+              <button class="lv-gal" id="lvGalBtn"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Snackbar -->
+        <div class="snack" id="snack"></div>
+
+      </div>
+
+      <nav class="nav" id="nav">
+        <button data-scr="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>主页</button>
+        <button data-scr="gallery"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>相册</button>
+        <button data-scr="transfer"><svg viewBox="0 0 24 24"><path d="M7 10l5-5 5 5M7 14l5 5 5-5"/></svg>传输</button>
+        <button data-scr="preset"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>预设</button>
+        <button data-scr="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg>设置</button>
+      </nav>
+    </div>
+    <div style="font-size:11px;color:var(--text3);letter-spacing:.14em;font-family:var(--mono)">NIKON CAMERA CONNECT · INTERACTIVE PROTOTYPE · 390×844</div>
+  </div>
+
+  <!-- ════ 右侧:状态检查器 ════ -->
+  <aside class="panel">
+    <div>
+      <h2>INSPECTOR <span class="zh">· 状态检查器</span></h2>
+      <div class="readout" style="margin-top:14px">
+        <div class="lbl">Current State</div>
+        <div class="val" id="roState">DISCONNECTED</div>
+        <div class="sub" id="roSub">未连接 · 等待扫描</div>
+      </div>
+    </div>
+    <div>
+      <h2>CONNECTION <span class="zh">· 连接信息</span></h2>
+      <div class="kv" style="margin-top:14px">
+        <div class="row"><span>型号</span><b id="kvModel">—</b></div>
+        <div class="row"><span>序列号</span><b id="kvSerial">—</b></div>
+        <div class="row"><span>传输方式</span><b id="kvTrans">—</b></div>
+        <div class="row"><span>电量</span><b id="kvBat">—</b></div>
+        <div class="row"><span>实时速度</span><b id="kvSpeed">—</b></div>
+      </div>
+    </div>
+    <div>
+      <h2>DEMO CONTROLS <span class="zh">· 演示控制</span></h2>
+      <div class="ctrls" style="margin-top:14px">
+        <button class="cbtn" id="cCapture">📷 模拟拍摄</button>
+        <button class="cbtn" id="cLv">🎥 实时取景</button>
+        <button class="cbtn warn" id="cErr">⚠ 触发错误</button>
+        <button class="cbtn warn" id="cDisc">⏏ 断开连接</button>
+      </div>
+    </div>
+    <div>
+      <h2>EVENT LOG <span class="zh">· 事件日志</span></h2>
+      <div class="log" id="log" style="margin-top:14px"></div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+/* ════════ 全局状态机 ════════ */
+const $=id=>document.getElementById(id);
+const S={state:'DISCONNECTED',transport:0,devices:[],files:[],tasks:[],burst:0,auto:true,sel:new Set(),propT:null,scanT:null,jobId:1,fileId:100,galFilter:null};
+const CAP={DISCONNECTED:'未连接',SCANNING:'扫描中…',CONNECTING:'连接中…',CONNECTED:'NIKON Z 8',TRANSFERRING:'传输中',ERROR:'连接错误'};
+const SUB={DISCONNECTED:'未连接 · 等待扫描',SCANNING:'正在检测设备…',CONNECTING:'建立 PTP 会话…',CONNECTED:'已连接 · 实时同步中',TRANSFERRING:'文件传输进行中',ERROR:'发生错误 · 需重试'};
+
+function log(m,c){const l=$('log');const d=new Date();const t=String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');const ln=document.createElement('div');ln.className='ln';ln.innerHTML='<span class="t">'+t+'</span><span class="m '+(c||'')+'">'+m+'</span>';l.prepend(ln);}
+
+function setState(s){
+  S.state=s;
+  const cap=$('capsule');cap.dataset.s=s;$('capText').textContent=CAP[s];
+  document.querySelectorAll('.sm-node').forEach(n=>n.classList.toggle('on',n.dataset.s===s));
+  $('roState').textContent=s;$('roSub').textContent=SUB[s];
+  $('roState').style.color=({SCANNING:'var(--yellow)',CONNECTING:'var(--yellow)',CONNECTED:'var(--green)',TRANSFERRING:'var(--yellow)',ERROR:'var(--red)'})[s]||'var(--yellow)';
+  renderHome();renderGallery();renderTransfer();renderPreset();renderSettings();
+  log('状态 → '+s,({CONNECTED:'g',ERROR:'r',TRANSFERRING:'y'})[s]||'b');
+}
+
+/* ════════ 时钟 & 光圈刻度 ════════ */
+(function(){const d=new Date();$('clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');})();
+
+/* ════════ Snackbar ════════ */
+let snackT=null;
+function snack(m,err){const s=$('snack');s.textContent=m;s.className='snack on'+(err?' err':'');clearTimeout(snackT);snackT=setTimeout(()=>s.classList.remove('on'),2600);}
+
+/* ════════ 连接方式切换(记忆,不重置) ════════ */
+$('seg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.transport=+b.dataset.t;document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));log('连接方式 → '+['USB','Wi-Fi','蓝牙'][S.transport]);});
+
+/* ════════ 扫描流程(≥3s + 分步文案) ════════ */
+const STEPS=['检测 USB 设备…','检测 Wi-Fi 热点…','检测蓝牙设备…'];
+$('scanBtn').addEventListener('click',()=>{
+  if(S.state==='SCANNING')return;
+  S.devices=[];renderDevices();
+  setState('SCANNING');
+  $('aperture').classList.add('scanning');
+  $('scanBtn').classList.add('loading');$('scanBtn').disabled=true;$('scanBtnTxt').textContent='扫描中…';
+  $('scanTitle').textContent='正在扫描…';
+  let step=0;$('scanSub').innerHTML='<span class="step">'+STEPS[0]+'</span>';
+  S.scanT=setInterval(()=>{step=(step+1)%STEPS.length;$('scanSub').innerHTML='<span class="step">'+STEPS[step]+'</span>';},900);
+  setTimeout(()=>{
+    clearInterval(S.scanT);
+    $('aperture').classList.remove('scanning');
+    $('scanBtn').classList.remove('loading');$('scanBtn').disabled=false;$('scanBtnTxt').textContent='重新扫描';
+    S.devices=[{model:'NIKON Z 8',serial:'3041827',trans:['USB','Wi-Fi'][S.transport===1?1:0],bat:82},{model:'NIKON Z 6Ⅱ',serial:'2088341',trans:'USB',bat:64}];
+    if(S.transport===2)S.devices=[{model:'NIKON Z f (BLE)',serial:'4012209',trans:'蓝牙',bat:91}];
+    setState('DISCONNECTED');
+    $('scanTitle').textContent='发现 '+S.devices.length+' 台设备';
+    $('scanSub').textContent='点击设备卡片开始连接';
+    renderDevices();log('扫描完成 · 发现 '+S.devices.length+' 台设备','y');
+  },3000);
+});
+
+function renderDevices(){
+  const box=$('devList');
+  if(!S.devices.length){box.innerHTML='';return;}
+  let h='<div class="dev-head"><b>发现的设备</b><span>'+S.devices.length+' FOUND</span></div>';
+  S.devices.forEach((d,i)=>{
+    h+='<div class="dev-card" data-i="'+i+'" style="animation-delay:'+(i*0.12)+'s">'
+     +'<span class="ic"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.4"/></svg></span>'
+     +'<span class="inf"><span class="md">'+d.model+'</span><span class="mt"><span class="tag">'+d.trans+'</span><span>SN '+d.serial+'</span></span></span>'
+     +'<span class="bat"><span class="batbar"><i style="width:'+d.bat+'%"></i></span><span style="font-size:11px;color:'+(d.bat>20?'var(--green)':'var(--red)')+'">'+d.bat+'%</span></span>'
+     +'<span class="chev">›</span></div>';
+  });
+  box.innerHTML=h;
+  box.querySelectorAll('.dev-card').forEach(c=>c.addEventListener('click',()=>connect(+c.dataset.i)));
+}
+
+/* ════════ 连接流程 ════════ */
+function connect(i){
+  if(S.state==='CONNECTING')return;
+  const d=S.devices[i];setState('CONNECTING');
+  // 模拟从机身读取参数(PTP GetDevicePropValue)
+  propVals=['--','--','--','--'];
+  setTimeout(()=>{
+    S.cur=d;setState('CONNECTED');
+    $('kvModel').textContent=d.model;$('kvSerial').textContent=d.serial;$('kvTrans').textContent=d.trans;$('kvBat').textContent=d.bat+'%';
+    if(!S.files.length)seedFiles();
+    log('PTP 会话已建立 · 读取机身参数…','b');
+    // 模拟 800ms 后参数从机身返回
+    setTimeout(()=>{
+      propVals=[BODY_DEFAULTS.shut,BODY_DEFAULTS.ap,BODY_DEFAULTS.iso,BODY_DEFAULTS.ev];
+      log('机身参数已同步 · '+propVals.join(' / '),'g');
+      startPropPoll();
+    },800);
+    snack('✓ 已连接 '+d.model);
+  },1500);
+}
+
+function disconnect(silent){
+  stopPropPoll();S.cur=null;tfBuilt=false;
+  setState('DISCONNECTED');
+  S.devices=[];renderDevices();
+  $('scanTitle').textContent='未发现尼康设备';$('scanSub').textContent='连接相机后选择连接方式';$('scanBtnTxt').textContent='扫描设备';
+  $('kvModel').textContent='—';$('kvSerial').textContent='—';$('kvTrans').textContent='—';$('kvBat').textContent='—';$('kvSpeed').textContent='—';
+  if(!silent)snack('⏏ 相机已断开连接',true);
+}
+
+/* ════════ 主页渲染(扫描/仪表盘) ════════ */
+function renderHome(){
+  const dash=$('homeDash'),scan=$('homeScan');
+  const on=S.state==='CONNECTED'||S.state==='TRANSFERRING';
+  dash.style.display=on?'block':'none';
+  scan.style.display=on?'none':'block';
+  if(on&&!dash.dataset.built){dash.dataset.built='1';}
+  if(on)renderDash();
+}
+const PROPS=[['快门',0],['光圈',1],['ISO',2],['EV',3],['对焦',null,'AF-C'],['画质',null,'RAW']];
+function renderDash(){
+  const d=S.cur||{model:'NIKON Z 8',serial:'—',bat:82};
+  let cells='';PROPS.forEach((p,i)=>{const hl=p[1]!==null&&[1,3].includes(i);const val=p[1]!==null?propVals[p[1]]:p[2];cells+='<div class="pcell'+(hl?' hl':'')+'" id="pc'+i+'">'+(hl?'<span class="pd"></span>':'')+'<div class="pl">'+p[0]+'</div><div class="pv">'+val+'</div></div>';});
+  $('homeDash').innerHTML=
+   '<div class="dash-card"><div class="top"><div><div class="md">'+d.model+'</div><div class="sn">SN '+d.serial+' · '+d.trans+'</div></div><span class="livedot"></span></div>'
+  +'<div class="row2"><div><div class="cellbl">电量 BATTERY</div><div class="big" style="color:'+(d.bat>20?'var(--green)':'var(--red)')+'">'+d.bat+'%</div></div>'
+  +'<div style="text-align:right"><div class="cellbl">存储 STORAGE</div><div class="big">48.2 <span style="font-size:11px;color:var(--text3)">/ 128 GB</span></div></div></div>'
+  +'<div class="storebar"><i></i></div></div>'
+  +'<div class="sec-head"><b>当前拍摄参数</b><span class="sync"><i></i>实时同步</span></div>'
+  +'<div class="pgrid">'+cells+'</div>'
+  +'<div class="sec-head"><b>快速操作</b></div>'
+  +'<div class="qgrid">'
+  +'<button class="qbtn" onclick="doCapture()"><svg viewBox="0 0 24 24" stroke="var(--yellow)"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.4"/></svg><span>立即拍摄</span></button>'
+  +'<button class="qbtn ghost" onclick="doBurst()"><svg viewBox="0 0 24 24" stroke="var(--yellow)"><rect x="3" y="6" width="13" height="13" rx="2"/><path d="M8 3h11v11"/></svg><span>连拍模式</span></button>'
+  +'<button class="qbtn" onclick="openLv()"><svg viewBox="0 0 24 24" stroke="var(--blue)"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3"/></svg><span>实时取景</span></button>'
+  +'<button class="qbtn" onclick="gotoTab(\'gallery\')"><svg viewBox="0 0 24 24" stroke="var(--text2)"><path d="M7 10l5-5 5 5M7 14l5 5 5-5"/></svg><span>传输全部</span></button>'
+  +'</div>'
+  +'<div class="autorow"><span class="aic">⇄</span><div><b>边拍边传</b><p>新文件自动导出到 /DCIM/NikonConnect</p></div><span class="switch'+(S.auto?' on':'')+'" id="autoSw" onclick="toggleAuto()"><i></i></span></div>';
+}
+function toggleAuto(){S.auto=!S.auto;const sw=$('autoSw');if(sw)sw.classList.toggle('on',S.auto);log('边拍边传 '+(S.auto?'开启':'关闭'),S.auto?'g':'');}
+
+/* 参数轮询(2s 从机身读取 + 黄色闪烁) */
+const SHUT=['30"','25"','20"','15"','13"','10"','8"','6"','5"','4"','3.2"','2.5"','2"','1.6"','1.3"','1"','0.8"','0.6"','0.5"','0.4"','1/3','1/4','1/5','1/6','1/8','1/10','1/13','1/15','1/20','1/25','1/30','1/40','1/50','1/60','1/80','1/100','1/125','1/160','1/200','1/250','1/320','1/400','1/500','1/640','1/800','1/1000','1/1250','1/1600','1/2000','1/2500','1/3200','1/4000','1/5000','1/6400','1/8000'];
+const ISO=['64','80','100','125','160','200','250','320','400','500','640','800','1000','1250','1600','2000','2500','3200','4000','5000','6400','8000','10000','12800','16000','20000','25600'];
+const AP=['f/1.4','f/1.6','f/1.8','f/2','f/2.2','f/2.5','f/2.8','f/3.2','f/3.5','f/4','f/4.5','f/5','f/5.6','f/6.3','f/7.1','f/8','f/9','f/10','f/11','f/13','f/14','f/16','f/18','f/20','f/22'];
+const EV=['-5','-4.7','-4.3','-4','-3.7','-3.3','-3','-2.7','-2.3','-2','-1.7','-1.3','-1','-0.7','-0.3','0','+0.3','+0.7','+1','+1.3','+1.7','+2','+2.3','+2.7','+3','+3.3','+3.7','+4','+4.3','+4.7','+5'];
+// 模拟连接时从机身读取的初始值
+const BODY_DEFAULTS={shut:'1/250',ap:'f/2.8',iso:'400',ev:'0'};
+let propVals=[BODY_DEFAULTS.shut,BODY_DEFAULTS.ap,BODY_DEFAULTS.iso,BODY_DEFAULTS.ev];
+function startPropPoll(){stopPropPoll();S.propT=setInterval(()=>{
+  // 模拟机身参数微变(曝光补偿自动微调等)
+  const evIdx=EV.indexOf(propVals[3]);
+  if(Math.random()<0.3&&evIdx>=0){const ni=Math.max(0,Math.min(EV.length-1,evIdx+(Math.random()<0.5?-1:1)));propVals[3]=EV[ni];}
+  [0,1,2,3].forEach(i=>{const el=$('pc'+i);if(el){el.querySelector('.pv').textContent=propVals[i];el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),600);}});
+  if($('lv').classList.contains('on'))renderLvParams();
+},2000);}
+function stopPropPoll(){if(S.propT){clearInterval(S.propT);S.propT=null;}}
+
+/* ════════ 拍摄 ════════ */
+function seedFiles(){for(let i=0;i<9;i++)S.files.push(mkFile(i%3===0?'NEF':'JPG'));}
+function mkFile(fmt){S.fileId++;return{id:S.fileId,name:'DSC_'+String(S.fileId).padStart(4,'0')+'.'+(fmt==='NEF'?'NEF':'JPG'),fmt:fmt,size:fmt==='NEF'?55.2:12.8,date:'今天',hue:(S.fileId*47)%360,done:false};}
+function doCapture(){
+  if(S.state!=='CONNECTED'&&S.state!=='TRANSFERRING'){snack('请先连接相机',true);return;}
+  const f=mkFile('NEF');S.files.unshift(f);
+  snack('📷 拍摄完成 · '+f.name);
+  if($('lv').classList.contains('on')){$('lvFlash').classList.remove('go');void $('lvFlash').offsetWidth;$('lvFlash').classList.add('go');}
+  log('拍摄 · 新文件 '+f.name,'g');
+  if(S.auto)autoTransfer(f);
+  renderGallery();
+}
+function doBurst(){
+  if(S.state!=='CONNECTED'&&S.state!=='TRANSFERRING'){snack('请先连接相机',true);return;}
+  let n=0;const t=setInterval(()=>{n++;doCapture();if(n>=3)clearInterval(t);},450);
+  log('连拍 ×3','y');
+}
+
+/* ════════ 传输(自动/手动) ════════ */
+function autoTransfer(f){addTask(f);}
+function addTask(f){
+  const job={id:S.jobId++,file:f,pct:0,status:'run',spd:0};
+  S.tasks.unshift(job);
+  if(S.state==='CONNECTED')setState('TRANSFERRING');
+  renderTransfer();
+  log('开始传输 '+f.name,'y');
+  const t=setInterval(()=>{
+    job.pct+=Math.random()*16+6;job.spd=(Math.random()*20+22).toFixed(1);
+    $('kvSpeed').textContent=job.spd+' MB/s';
+    if(job.pct>=100){job.pct=100;job.status='done';job.spd=0;clearInterval(t);
+      f.done=true;log('传输完成 '+f.name+' ✓','g');
+      if(!S.tasks.some(x=>x.status==='run')){setState('CONNECTED');$('kvSpeed').textContent='—';}
+      renderGallery();}
+    renderTransfer();
+  },420);
+}
+
+/* ════════ 导航 ════════ */
+function gotoTab(name){
+  // 切换 tab 时自动关闭 LiveView
+  if($('lv').classList.contains('on'))closeLv();
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.scr===name));
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.dataset.scr===name));
+}
+$('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(b)gotoTab(b.dataset.scr);});
+
+/* ════════ 相册 ════════ */
+function renderGallery(){
+  const box=$('galScroll');const on=S.state==='CONNECTED'||S.state==='TRANSFERRING';
+  if(!on){box.innerHTML='<div class="empty"><span class="eic"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.4"/></svg></span><b>未连接相机</b><p>无法浏览存储卡文件<br>请先在主页连接相机</p><button class="go" onclick="gotoTab(\'home\')">去连接</button></div>';return;}
+  const files=S.galFilter?S.files.filter(f=>{
+    switch(S.galFilter){case 'RAW':return f.fmt==='NEF';case 'JPEG':return f.fmt==='JPG';case '已传':return f.done;case '未传':return !f.done;default:return true;}
+  }):S.files;
+  let thumbs='';
+  files.forEach(f=>{
+    thumbs+='<div class="thumb'+(S.sel.has(f.id)?' picked':'')+'" data-id="'+f.id+'"><span class="ph" style="filter:hue-rotate('+f.hue+'deg)"></span>'
+    +(f.done?'<span class="done">✓</span>':'')+'<span class="fmt">'+f.fmt+'</span><span class="sel">✓</span></div>';
+  });
+  const done=files.filter(f=>f.done).length;
+  box.innerHTML='<div class="gal-top"><b>相册</b><span class="cardtabs"><button class="on">CF-A</button><button>SD-B</button></span>'
+  +'<button class="viewtog"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button></div>'
+  +'<div class="chips">'+['全部','RAW','JPEG','已传','未传'].map(c=>'<button class="chip'+((!S.galFilter&&c==='全部')||S.galFilter===c?' on':'')+'">'+c+'</button>').join('')+'</div>'
+  +'<div class="gal-grid"><div class="dgroup">今天 · '+files.length+' 个文件</div>'+thumbs+'</div>'
+  +'<div class="gal-stat"><span>总计 <b>'+files.length+'</b></span><span>已传 <b style="color:var(--green)">'+done+'</b></span><span>未传 <b style="color:var(--yellow)">'+(files.length-done)+'</b></span></div>'
+  +(S.sel.size?'<div class="multibar"><b>'+S.sel.size+' 已选</b><span class="mb"><button class="tr" onclick="transferSel()">传输</button><button class="ca" onclick="clearSel()">取消</button></span></div>':'');
+  box.querySelectorAll('.thumb').forEach(t=>t.addEventListener('click',()=>{
+    const id=+t.dataset.id;
+    if(S.sel.has(id))S.sel.delete(id);else S.sel.add(id);
+    renderGallery();
+  }));
+  // 筛选 chips 交互
+  box.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+    box.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));
+    c.classList.add('on');
+    S.galFilter=c.textContent.trim();
+    renderGallery();
+  }));
+  // 存储卡切换
+  box.querySelectorAll('.cardtabs button').forEach(b=>b.addEventListener('click',()=>{
+    box.querySelectorAll('.cardtabs button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  }));
+}
+function clearSel(){S.sel.clear();renderGallery();}
+function transferSel(){
+  const ids=[...S.sel];S.sel.clear();
+  ids.forEach(id=>{const f=S.files.find(x=>x.id===id);if(f&&!f.done)addTask(f);});
+  gotoTab('transfer');
+}
+
+/* ════════ 传输页(增量更新,避免闪烁) ════════ */
+let tfBuilt=false;
+function renderTransfer(){
+  const box=$('tfScroll');
+  const run=S.tasks.filter(t=>t.status==='run'),done=S.tasks.filter(t=>t.status==='done');
+  const spd=run.reduce((a,t)=>a+parseFloat(t.spd||0),0).toFixed(1);
+  const pct=run.length?Math.round(run.reduce((a,t)=>a+t.pct,0)/run.length):0;
+  const C=2*Math.PI*40,off=C*(1-pct/100);
+  // 增量更新:如果 DOM 已构建,只更新数值
+  if(tfBuilt&&box.querySelector('.gauge')){
+    const ring=box.querySelector('.gauge circle:last-child');
+    if(ring)ring.setAttribute('stroke-dashoffset',off);
+    const spdEl=box.querySelector('.spd');if(spdEl)spdEl.textContent=run.length?spd:'0.0';
+    const meta=box.querySelectorAll('.gmeta b');if(meta[0])meta[0].textContent=run.length;if(meta[1])meta[1].textContent=done.length;
+    // 更新每个任务卡的进度
+    box.querySelectorAll('.tjob[data-jid]').forEach(el=>{
+      const jid=+el.dataset.jid;const job=S.tasks.find(t=>t.id===jid);if(!job)return;
+      const bar=el.querySelector('.pbar i');if(bar)bar.style.width=job.pct+'%';
+      const pc=el.querySelector('.pc');if(pc)pc.textContent=job.status==='done'?'✓ 完成':Math.round(job.pct)+'%';
+      const tr2=el.querySelectorAll('.tr2 span');if(tr2[1])tr2[1].textContent=job.status==='run'?job.spd+' MB/s':'已完成';
+      if(job.status==='done'&&!el.classList.contains('done')){el.classList.add('done');}
+    });
+    // 如果任务列表结构变了(新增/完成),重建
+    const existIds=[...box.querySelectorAll('.tjob[data-jid]')].map(e=>+e.dataset.jid);
+    const curIds=S.tasks.map(t=>t.id);
+    if(existIds.length!==curIds.length||existIds.some((v,i)=>v!==curIds[i])){tfBuilt=false;renderTransfer();}
+    return;
+  }
+  // 全量构建
+  tfBuilt=true;
+  let jobs='';
+  const mk=(t,cls)=>'<div class="tjob '+cls+'" data-jid="'+t.id+'"><div class="tr1"><span class="fic">'+t.file.fmt+'</span><span class="fn">'+t.file.name+'</span><span class="pc">'+(t.status==='done'?'✓ 完成':Math.round(t.pct)+'%')+'</span></div>'
+   +'<div class="pbar"><i style="width:'+t.pct+'%"></i></div>'
+   +'<div class="tr2"><span>'+t.file.size+' MB</span><span>'+(t.status==='run'?t.spd+' MB/s':t.status==='done'?'已完成':'')+'</span></div></div>';
+  if(run.length)jobs+='<div class="tsec">传输中 <span class="cnt">'+run.length+'</span></div>'+run.map(t=>mk(t,'')).join('');
+  if(done.length)jobs+='<div class="tsec" style="color:var(--green)">已完成 <span class="cnt" style="color:var(--green)">'+done.length+'</span></div>'+done.map(t=>mk(t,'done')).join('');
+  box.innerHTML='<div class="gauge"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--surface3)" stroke-width="7"/>'
+  +'<circle cx="50" cy="50" r="40" fill="none" stroke="var(--yellow)" stroke-width="7" stroke-linecap="round" stroke-dasharray="'+C+'" stroke-dashoffset="'+off+'" style="transition:stroke-dashoffset .4s"/></svg>'
+  +'<div><div class="spd">'+(run.length?spd:'0.0')+'</div><div class="spdu">MB/s · 实时速度</div></div>'
+  +'<div class="gmeta"><span>活跃任务 <b>'+run.length+'</b></span><span>已完成 <b style="color:var(--green)">'+done.length+'</b></span></div></div>'
+  +(S.tasks.length?jobs:'<div class="empty"><span class="eic"><svg viewBox="0 0 24 24"><path d="M7 10l5-5 5 5M7 14l5 5 5-5"/></svg></span><b>'+(S.state==='CONNECTED'||S.state==='TRANSFERRING'?'暂无传输任务':'未连接相机')+'</b><p>'+(S.state==='CONNECTED'||S.state==='TRANSFERRING'?'在相册中选择文件即可开始传输':'请先在主页连接相机，然后从相册发起传输')+'</p></div>');
+}
+
+/* ════════ 预设 ════════ */
+const PRESETS=[{n:'风景 A',d:'高饱和 · 锐利',on:true},{n:'人像柔光',d:'低对比 · 柔和肤色'},{n:'夜景高感',d:'降噪优先 · 高锐度'}];
+function renderPreset(){
+  const box=$('psScroll');const on=S.state==='CONNECTED';
+  let h=(on?'':'<div class="tipbar"><i>⚠</i>未连接相机 · 预设可编辑但无法应用到相机</div>');
+  h+='<div class="sec-head" style="margin-top:0"><b>PICTURE CONTROL · 预设中心</b></div>';
+  PRESETS.forEach((p,i)=>{
+    h+='<div class="preset'+(p.on?' act':'')+(i===0?' open':'')+'" data-i="'+i+'"><div class="ph"><span class="sw"></span><span><span class="pn">'+p.n+'</span><span class="pd2">'+p.d+'</span></span>'
+    +'<button class="apply'+(p.on?' ok':'')+'" '+(on?'':'disabled')+' data-a="'+i+'">'+(p.on?'✓ 已应用':'应用')+'</button><span class="chev2">⌄</span></div>'
+    +'<div class="pb"><div class="pbi">'
+    +sld('色相',0)+sld('饱和度',65)+sld('对比度',40)+sld('清晰度',60)+sld('锐化',50)
+    +'</div></div></div>';
+  });
+  box.innerHTML=h;
+  box.querySelectorAll('.preset .ph').forEach(ph=>ph.addEventListener('click',e=>{
+    if(e.target.closest('.apply'))return;
+    ph.parentElement.classList.toggle('open');
+  }));
+  box.querySelectorAll('.apply').forEach(b=>b.addEventListener('click',()=>{
+    if(!on)return;
+    const i=+b.dataset.a;PRESETS.forEach((p,j)=>p.on=j===i);
+    b.textContent='应用中…';setTimeout(()=>{renderPreset();snack('✓ 已应用预设「'+PRESETS[i].n+'」');log('应用预设 '+PRESETS[i].n,'g');},700);
+  }));
+  box.querySelectorAll('.sld input').forEach(inp=>inp.addEventListener('input',()=>{inp.nextElementSibling.textContent=inp.value;}));
+}
+function sld(l,v){return '<div class="sld"><span class="sl">'+l+'</span><input type="range" min="0" max="100" value="'+v+'"><span class="sv">'+v+'</span></div>';}
+
+/* ════════ 设置(可交互) ════════ */
+let setConcurrent=3,setResume=true,setFtpAuto=false;
+function renderSettings(){
+  const on=S.state==='CONNECTED'||S.state==='TRANSFERRING';const d=S.cur;
+  $('stScroll').innerHTML=
+  '<div class="sec-head" style="margin-top:4px"><b>设置 · SETTINGS</b></div>'
+  +'<div class="setcard"><div class="st">相机连接</div>'
+  +'<div class="setrow"><span>当前状态</span><span class="sv2" style="color:'+(on?'var(--green)':'var(--text3)')+'">'+(on?'已连接':'未连接')+'</span></div>'
+  +(d?'<div class="setrow"><span>设备</span><span class="sv2">'+d.model+'</span></div><div class="setrow"><span>传输方式</span><span class="sv2">'+d.trans+'</span></div>':'')+'</div>'
+  +'<div class="setcard"><div class="st">传输设置</div>'
+  +'<div class="setrow" data-act="concurrent"><span>并发任务数</span><span class="sv2" id="setConc">'+setConcurrent+'</span></div>'
+  +'<div class="setrow" data-act="auto"><span>自动传输</span><span class="switch'+(S.auto?' on':'')+'" id="setAuto"><i></i></span></div>'
+  +'<div class="setrow" data-act="resume"><span>断点续传</span><span class="switch'+(setResume?' on':'')+'" id="setResume"><i></i></span></div>'
+  +'<div class="setrow" data-act="storage"><span>存储目标</span><span class="sv2">/DCIM/NikonConnect</span></div></div>'
+  +'<div class="setcard"><div class="st">FTP 自动化</div>'
+  +'<div class="setrow" data-act="ftpHost"><span>FTP 服务器</span><span class="sv2">192.168.1.100</span></div>'
+  +'<div class="setrow" data-act="ftpAuto"><span>自动上传</span><span class="switch'+(setFtpAuto?' on':'')+'" id="setFtpAuto"><i></i></span></div></div>'
+  +'<div class="setcard"><div class="st">关于</div>'
+  +'<div class="setrow"><span>版本</span><span class="sv2">1.0.0-beta</span></div>'
+  +'<div class="setrow"><span>核心库</span><span class="sv2">libcore v1.0</span></div></div>';
+  // 绑定交互
+  $('setAuto')&&($('setAuto').onclick=()=>{S.auto=!S.auto;$('setAuto').classList.toggle('on',S.auto);log('设置 · 自动传输 '+(S.auto?'开':'关'));});
+  $('setResume')&&($('setResume').onclick=()=>{setResume=!setResume;$('setResume').classList.toggle('on',setResume);log('设置 · 断点续传 '+(setResume?'开':'关'));});
+  $('setFtpAuto')&&($('setFtpAuto').onclick=()=>{setFtpAuto=!setFtpAuto;$('setFtpAuto').classList.toggle('on',setFtpAuto);log('设置 · FTP自动上传 '+(setFtpAuto?'开':'关'));});
+  const concRow=document.querySelector('[data-act="concurrent"]');
+  concRow&&(concRow.onclick=()=>{setConcurrent=setConcurrent%4+1;$('setConc').textContent=setConcurrent;log('设置 · 并发数 → '+setConcurrent);snack('并发任务数 → '+setConcurrent);});
+}
+
+/* ════════ LiveView ════════ */
+function openLv(){
+  if(S.state!=='CONNECTED'&&S.state!=='TRANSFERRING'){snack('请先连接相机再进入实时取景',true);return;}
+  $('lv').classList.add('on');renderLvParams();log('进入实时取景','y');
+}
+function closeLv(){$('lv').classList.remove('on');log('退出实时取景');}
+$('lvBack').addEventListener('click',closeLv);
+$('lvGalBtn').addEventListener('click',()=>{closeLv();gotoTab('gallery');});
+function renderLvParams(){$('lvParams').innerHTML=[['SHUTTER',propVals[0],0],['APERTURE',propVals[1],1],['ISO',propVals[2],2],['EV','+0.3',3]].map(p=>'<span class="lp" data-pi="'+p[2]+'"><div class="lk">'+p[0]+'</div><div class="lv2">'+p[1]+'</div></span>').join('');}
+/* 参数点击弹出刻度尺(手机相机风格) + 拖拽滑动 */
+const LV_ADJ={0:SHUT,1:AP,2:ISO,3:EV};
+const LV_LABELS={0:'SHUTTER',1:'APERTURE',2:'ISO',3:'EV'};
+let lvRulerOpen=null;
+$('lvParams').addEventListener('click',e=>{
+  const lp=e.target.closest('.lp');
+  const tick=e.target.closest('.lv-ruler .tick');
+  if(tick){selectTick(tick);return;}
+  if(!lp)return;
+  const pi=+lp.dataset.pi;
+  if(lvRulerOpen===pi){closeLvRuler();return;}
+  closeLvRuler();lvRulerOpen=pi;lp.classList.add('active');
+  const opts=LV_ADJ[pi];if(!opts)return;
+  const cur=lp.querySelector('.lv2').textContent;
+  const ruler=document.createElement('div');ruler.className='lv-ruler';
+  ruler.innerHTML='<span class="rlabel">'+LV_LABELS[pi]+' · 滑动调节</span><span class="indicator"></span><div class="track">'
+    +opts.map((v,i)=>'<span class="tick'+(v===cur?' on':'')+'" data-pi="'+pi+'" data-val="'+v+'" data-idx="'+i+'"><span class="tv">'+v+'</span></span>').join('')
+    +'</div>';
+  $('lvParams').parentElement.insertBefore(ruler,$('lvParams'));
+  requestAnimationFrame(()=>{const on=ruler.querySelector('.tick.on');if(on)on.scrollIntoView({inline:'center',block:'nearest'});});
+  // 拖拽滑动支持
+  initRulerDrag(ruler,pi);
+});
+function selectTick(tick){
+  const pi=+tick.dataset.pi;const val=tick.dataset.val;
+  propVals[pi]=val;
+  const targetLp=document.querySelector('.lp[data-pi="'+pi+'"]');
+  if(targetLp)targetLp.querySelector('.lv2').textContent=val;
+  tick.parentElement.querySelectorAll('.tick').forEach(t=>t.classList.toggle('on',t===tick));
+  tick.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'});
+  log('LV · '+LV_LABELS[pi]+' → '+val,'y');
+}
+function initRulerDrag(ruler,pi){
+  const track=ruler.querySelector('.track');
+  let dragging=false,startX=0,startScroll=0;
+  const onDown=e=>{dragging=true;startX=e.touches?e.touches[0].clientX:e.clientX;startScroll=track.scrollLeft;track.style.scrollBehavior='auto';e.preventDefault();};
+  const onMove=e=>{if(!dragging)return;const x=e.touches?e.touches[0].clientX:e.clientX;track.scrollLeft=startScroll-(x-startX);};
+  const onUp=()=>{if(!dragging)return;dragging=false;track.style.scrollBehavior='smooth';
+    // 吸附到中心最近的刻度
+    const center=track.scrollLeft+track.offsetWidth/2;
+    let closest=null,minDist=Infinity;
+    track.querySelectorAll('.tick').forEach(t=>{const r=t.offsetLeft+t.offsetWidth/2;const d=Math.abs(r-center);if(d<minDist){minDist=d;closest=t;}});
+    if(closest)selectTick(closest);
+  };
+  track.addEventListener('mousedown',onDown);track.addEventListener('touchstart',onDown,{passive:false});
+  window.addEventListener('mousemove',onMove);window.addEventListener('touchmove',onMove,{passive:false});
+  window.addEventListener('mouseup',onUp);window.addEventListener('touchend',onUp);
+  // 存储清理引用
+  ruler._cleanup=()=>{window.removeEventListener('mousemove',onMove);window.removeEventListener('touchmove',onMove);window.removeEventListener('mouseup',onUp);window.removeEventListener('touchend',onUp);};
+}
+function closeLvRuler(){
+  if(lvRulerOpen===null)return;
+  const lp=document.querySelector('.lp[data-pi="'+lvRulerOpen+'"]');
+  if(lp)lp.classList.remove('active');
+  const r=$('lvParams').parentElement.querySelector('.lv-ruler');if(r){if(r._cleanup)r._cleanup();r.remove();}
+  lvRulerOpen=null;
+}
+// 点击取景画面对焦时不关闭刻度尺(与真实相机App一致)
+// 刻度尺仅通过再次点击参数或切换参数关闭
+
+/* 点击对焦 */
+$('lvScene').addEventListener('click',e=>{
+  const r=$('lv').getBoundingClientRect();
+  const f=$('lvFocus');
+  f.style.left=((e.clientX-r.left)/r.width*100)+'%';
+  f.style.top=((e.clientY-r.top)/r.height*100)+'%';
+  f.classList.add('lock');setTimeout(()=>f.classList.remove('lock'),700);
+});
+/* 快门 */
+$('shutter').addEventListener('click',()=>{S.burst++;$('lvCount').textContent='连拍 '+S.burst;doCapture();});
+/* 变焦 */
+let zoom=1.0;
+$('zIn').addEventListener('click',()=>{zoom=Math.min(4,+(zoom+0.5).toFixed(1));$('zVal').textContent=zoom.toFixed(1)+'×';});
+$('zOut').addEventListener('click',()=>{zoom=Math.max(1,+(zoom-0.5).toFixed(1));$('zVal').textContent=zoom.toFixed(1)+'×';});
+/* AF 模式 */
+$('lvAf').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('lvAf').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));});
+/* 直方图 */
+(function(){let h='';for(let i=0;i<14;i++)h+='<b style="height:'+(20+Math.random()*75)+'%;animation-delay:'+(i*0.09)+'s"></b>';$('lvHist').innerHTML=h;})();
+
+/* ════════ 演示控制 ════════ */
+$('cCapture').addEventListener('click',doCapture);
+$('cLv').addEventListener('click',openLv);
+$('cErr').addEventListener('click',()=>{setState('ERROR');$('errSlot').innerHTML='<div class="errbanner"><span class="ei">⚠</span><div><b>连接失败</b><p>ERR -400 · USB 通信错误</p></div><span class="acts"><button class="rt" onclick="retryErr()">重试</button><button class="cl" onclick="dismissErr()">关闭</button></span></div>';snack('⚠ 发生连接错误',true);});
+$('cDisc').addEventListener('click',()=>disconnect(false));
+function retryErr(){$('errSlot').innerHTML='';setState('DISCONNECTED');}
+function dismissErr(){$('errSlot').innerHTML='';setState('DISCONNECTED');}
+
+/* ════════ 初始 ════════ */
+setState('DISCONNECTED');
+log('原型已加载 · 点击「扫描设备」开始演示','y');
+</script>
+</body>
+</html>

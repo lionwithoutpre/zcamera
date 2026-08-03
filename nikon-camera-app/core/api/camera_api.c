@@ -16,6 +16,11 @@
 #include "hal/usb.h"
 #include "hal/wifi.h"
 
+/* mtp.c 前向声明 (无独立头文件) */
+extern int mtp_send_file(PtpSession *session, const char *local_path,
+                         uint32_t storage_id, uint32_t parent_obj,
+                         const char *remote_name);
+
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -1203,17 +1208,87 @@ int camera_api_export_to_ftp(CameraAPI *api, const char *local_path) {
     return CAM_ERR_NOT_SUPPORTED;  /* 占位 */
 }
 
-/* ─── WiFi 直连 + 文件发送 (stub,待实现) ─────────────────── */
+/* ─── WiFi 直连 + 文件发送 ─────────────────────────────────── */
 
 int camera_api_connect_wifi(CameraAPI *api, const char *ip_addr, uint16_t port) {
-    (void)api; (void)ip_addr; (void)port;
-    return CAM_ERR_NOT_SUPPORTED;
+    if (!api || !ip_addr) return CAM_ERR_INVALID_PARAM;
+
+    _lock(api);
+
+    if (api->status >= STATUS_CONNECTED) {
+        _unlock(api);
+        return CAM_ERR_ALREADY_CONNECTED;
+    }
+
+    _set_status_locked(api, STATUS_CONNECTING);
+
+    /* 初始化 PTP 会话 (WiFi 模式) */
+    ptp_session_init(&api->session, -1, PTP_TRANSPORT_WIFI, 0, 0);
+
+    /* 创建 WiFi 适配器 */
+    api->adapter = adapter_create_wifi(ip_addr, port);
+    if (!api->adapter) {
+        _set_status_locked(api, STATUS_ERROR);
+        _unlock(api);
+        return CAM_ERR_OUT_OF_MEMORY;
+    }
+
+    /* 注入 session 到 WiFi 适配器 */
+    adapter_wifi_set_session(api->adapter, &api->session);
+
+    /* 执行连接 */
+    CameraCommand cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.type       = CAM_CMD_CONNECT;
+    cmd.timeout_ms = 5000;
+    CameraResult res = adapter_execute(api->adapter, &cmd);
+    if (res.result_code != 0) {
+        adapter_destroy(api->adapter);
+        free(api->adapter);
+        api->adapter = NULL;
+        _set_status_locked(api, STATUS_ERROR);
+        _unlock(api);
+        return res.result_code;
+    }
+
+    snprintf(api->current_camera.id, sizeof(api->current_camera.id),
+             "%s|wifi|%d", ip_addr, port);
+    snprintf(api->current_camera.model, sizeof(api->current_camera.model),
+             "NIKON (WiFi)");
+    api->current_camera.transport = 1;
+
+    /* 启动事件监听 (HTTP 轮询) */
+    api->watcher = watcher_create(&api->session, WATCHER_CHANNEL_HTTP_POLL);
+    if (api->watcher) {
+        watcher_set_wifi_endpoint(api->watcher, ip_addr,
+                                  port > 0 ? port : NIKON_WIFI_DEFAULT_PORT);
+        watcher_on_event(api->watcher, EVENT_NEW_FILE, _event_relay, api);
+        watcher_on_event(api->watcher, EVENT_CAPTURE_COMPLETE, _event_relay, api);
+        watcher_on_event(api->watcher, EVENT_ERROR, _event_relay, api);
+        watcher_start(api->watcher);
+    }
+
+    _ensure_transfer_init(api);
+
+    _set_status_locked(api, STATUS_CONNECTED);
+    _unlock(api);
+    return CAM_OK;
 }
 
 int camera_api_send_file(CameraAPI *api, const char *local_path,
                          uint32_t storage_id, const char *remote_name) {
-    (void)api; (void)local_path; (void)storage_id; (void)remote_name;
-    return CAM_ERR_NOT_SUPPORTED;
+    if (!api || !local_path) return CAM_ERR_INVALID_PARAM;
+
+    _lock(api);
+    if (!api->adapter || api->session.state < SESSION_OPEN) {
+        _unlock(api);
+        return CAM_ERR_NOT_CONNECTED;
+    }
+
+    int rc = mtp_send_file(&api->session, local_path, storage_id, 0, remote_name);
+    _unlock(api);
+
+    return (rc == 0) ? CAM_OK : CAM_ERR_TRANSFER_FAILED;
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nikon.app.ui.theme.*
 
 /**
@@ -30,6 +31,9 @@ import com.nikon.app.ui.theme.*
 fun PresetScreen(
     viewModel: com.nikon.app.viewmodel.CameraViewModel,
 ) {
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val connected = status == com.nikon.app.jni.CameraBridge.STATUS_CONNECTED
+
     // 预设数据 (UI 状态, 实际通过 camera_api_get/set_pictctrl 同步)
     var presets by remember {
         mutableStateOf(
@@ -109,6 +113,30 @@ fun PresetScreen(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // 未连接提示
+            if (!connected) {
+                item {
+                    Surface(
+                        color = NikonYellow.copy(alpha = 0.06f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NikonYellow.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Info, null, tint = NikonYellow, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "未连接相机，预设可编辑但无法应用到相机",
+                                fontSize = 12.sp, color = NikonText2,
+                            )
+                        }
+                    }
+                }
+            }
+
             items(presets.size) { index ->
                 val preset = presets[index]
                 PresetCard(

@@ -191,15 +191,19 @@ class CameraViewModel(
         if (!ensureHandle()) return
         viewModelScope.launch {
             _status.value = CameraBridge.STATUS_SCANNING
+            _cameras.value = emptyList()
+            // 保证扫描动画至少显示 3 秒,避免一闪而过
+            val scanStart = System.currentTimeMillis()
             val rawList = withContext(ioDispatcher) {
                 bridge.nativeScan(_handle) ?: emptyArray()
             }
+            val elapsed = System.currentTimeMillis() - scanStart
+            if (elapsed < 3000) {
+                delay(3000 - elapsed)
+            }
             val parsed = rawList.mapNotNull { CameraInfo.fromRaw(it) }
             _cameras.value = parsed
-            _status.value = if (parsed.isEmpty())
-                CameraBridge.STATUS_DISCONNECTED
-            else
-                CameraBridge.STATUS_DISCONNECTED  // 等用户选择后再连接
+            _status.value = CameraBridge.STATUS_DISCONNECTED
         }
     }
 

@@ -190,31 +190,6 @@ static void *_worker_thread(void *arg) {
                           ? (int)(ctx->transferred * 100 / ctx->file_size)
                           : 0;
             if (job->on_progress) job->on_progress(ctx, pct, job->user_data);
-
-            /* 传输进度回调 (TransferProgress 形式) */
-            double current_speed = (speed_samples > 0)
-                ? total_speed / (double)speed_samples : 0.0;
-            uint64_t now_ms = _now_ms();
-            uint64_t elapsed = (now_ms > ctx->timestamp_start_ms)
-                ? now_ms - ctx->timestamp_start_ms : 0;
-            uint64_t remaining_ms = (current_speed > 0.01 && ctx->file_size > ctx->transferred)
-                ? (uint64_t)((double)(ctx->file_size - ctx->transferred)
-                             / (current_speed * 1024.0 * 1024.0) * 1000.0)
-                : 0;
-
-            TransferProgress prog;
-            memset(&prog, 0, sizeof(prog));
-            prog.job_id         = job->job_id;
-            prog.object_handle  = ctx->object_handle;
-            prog.total_size     = ctx->file_size;
-            prog.transferred    = ctx->transferred;
-            prog.percent        = pct;
-            prog.speed_mbps     = current_speed;
-            prog.elapsed_ms     = elapsed;
-            prog.remaining_ms   = remaining_ms;
-            prog.status         = TRANSFER_STATUS_RUNNING;
-
-            (void)prog;
         }
 
         close(dest_fd);

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nikon.app.jni.CameraBridge
 import com.nikon.app.ui.theme.*
 import com.nikon.app.viewmodel.CameraViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +43,9 @@ fun TransferScreen(
 
     // 任务数据来自 ViewModel(发起传输时 add,完成/失败时 update)
     val allJobs by viewModel.transferJobs.collectAsStateWithLifecycle()
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val connected = status == CameraBridge.STATUS_CONNECTED ||
+                    status == CameraBridge.STATUS_TRANSFERRING
     // 转换为 UI 类型(TfJob),避免 TransferStatus/TfStatus 混用
     val allJobsUi = allJobs.map { it.toUi() }
 
@@ -192,6 +196,37 @@ fun TransferScreen(
             if (done.isNotEmpty()) {
                 item { SectionLabel("已完成", color = NikonGreen) }
                 items(done) { TransferJobCard(it, viewModel) }
+            }
+
+            // ── 空态提示 ──
+            if (allJobsUi.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Filled.SwapVert,
+                                null,
+                                tint = NikonText3,
+                                modifier = Modifier.size(40.dp),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                if (connected) "暂无传输任务"
+                                else "未连接相机",
+                                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NikonText2,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                if (connected) "在相册中选择文件即可开始传输"
+                                else "请先在主页连接相机，然后从相册发起传输",
+                                fontSize = 11.sp, color = NikonText3,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

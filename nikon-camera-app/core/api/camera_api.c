@@ -12,6 +12,7 @@
 #include "adapter/camera_adapter.h"
 #include "protocol/ptp.h"
 #include "transfer/transfer.h"
+#include "transfer/ftp_client.h"
 #include "event/watcher.h"
 #include "hal/usb.h"
 #include "hal/wifi.h"
@@ -880,6 +881,19 @@ int camera_api_get_property(CameraAPI *api, uint16_t prop_id, uint32_t *value) {
     return res.result_code;
 }
 
+int camera_api_get_properties(CameraAPI *api, const uint16_t *prop_ids,
+                              uint32_t *values, int count) {
+    if (!api || !prop_ids || !values || count <= 0) return CAM_ERR_INVALID_PARAM;
+
+    /* 逐项读取; 单项失败保留 values[i] 原值, 累计失败数返回 */
+    int failures = 0;
+    for (int i = 0; i < count; i++) {
+        int rc = camera_api_get_property(api, prop_ids[i], &values[i]);
+        if (rc != CAM_OK) failures++;
+    }
+    return failures;
+}
+
 /* ═══════════════════════════════════════════════════════════════
  *  Picture Control (PTP 0x90CC / 0x90CD)
  * ══════════════════════════════════════════════════════════════ */
@@ -1179,7 +1193,7 @@ void camera_api_on_new_file(CameraAPI *api,
 }
 
 /* ═══════════════════════════════════════════════════════════════
- *  FTP 自动化 (占位)
+ *  FTP 自动化 (真实实现: POSIX socket FTP 客户端)
  * ══════════════════════════════════════════════════════════════ */
 
 int camera_api_set_ftp_config(CameraAPI *api, const FtpConfig *config) {
@@ -1191,21 +1205,44 @@ int camera_api_set_ftp_config(CameraAPI *api, const FtpConfig *config) {
     return CAM_OK;
 }
 
+/** 异步 FTP 上传任务 (拷贝配置与路径, 供分离线程使用)。 */
+typedef struct {
+    FtpConfig cfg;
+    char      local_path[512];
+} FtpUploadJob;
+
+static void *_ftp_upload_thread(void *arg) {
+    FtpUploadJob *job = (FtpUploadJob *)arg;
+    int rc = ftp_client_upload(&job->cfg, job->local_path);
+    fprintf(stderr, "[FTP] upload %s -> %s:%u rc=%d\n",
+            job->local_path, job->cfg.host, (unsigned)job->cfg.port, rc);
+    free(job);
+    return NULL;
+}
+
 int camera_api_export_to_ftp(CameraAPI *api, const char *local_path) {
     if (!api || !local_path) return CAM_ERR_INVALID_PARAM;
+
     _lock(api);
     bool configured = api->ftp_configured;
+    FtpConfig cfg   = api->ftp_config;
     _unlock(api);
 
     if (!configured) return CAM_ERR_NOT_CONNECTED;
+    if (cfg.host[0] == '\0') return CAM_ERR_INVALID_PARAM;
 
-    /* TODO: 异步 FTP 上传 (libcurl / platform net API)
-     *   1) 连接 FTP 服务器
-     *   2) 上传文件
-     *   3) 可选: 上传后删除本地副本
-     */
-    (void)local_path;
-    return CAM_ERR_NOT_SUPPORTED;  /* 占位 */
+    FtpUploadJob *job = (FtpUploadJob *)malloc(sizeof(FtpUploadJob));
+    if (!job) return CAM_ERR_OUT_OF_MEMORY;
+    job->cfg = cfg;
+    snprintf(job->local_path, sizeof(job->local_path), "%s", local_path);
+
+    pthread_t t;
+    if (pthread_create(&t, NULL, _ftp_upload_thread, job) != 0) {
+        free(job);
+        return CAM_ERR_OUT_OF_MEMORY;
+    }
+    pthread_detach(t);
+    return CAM_OK;
 }
 
 /* ─── WiFi 直连 + 文件发送 ─────────────────────────────────── */

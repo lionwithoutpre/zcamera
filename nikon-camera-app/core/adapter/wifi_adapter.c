@@ -87,7 +87,12 @@ static CameraResult _wifi_execute(void *ctx, CameraCommand *cmd) {
         break;
     }
 
-    /* 其他命令委托给共享 PTP 实现 */
+    /* 其他命令委托给共享 PTP 实现。
+     * 未知命令类型先于 session 检查返回 NOT_SUPPORTED,
+     * 与 nikon_common_execute 的映射检查顺序保持一致。 */
+    if (cmd->type > CAM_CMD_EVENT_POLL) {
+        return _wifi_make_error(CAM_ERR_NOT_SUPPORTED, "unknown command");
+    }
     if (!c->session) return _wifi_make_error(CAM_ERR_NOT_CONNECTED, "no session");
     return nikon_common_execute(c->session, cmd);
 }

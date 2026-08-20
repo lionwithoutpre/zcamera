@@ -12,10 +12,12 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 
 /* ─── 状态 ───────────────────────────────────────────────────── */
 
@@ -63,58 +65,173 @@ static int _build_mdns_query(uint8_t *buf, int max_len) {
 
 /* ─── mDNS 响应解析 ──────────────────────────────────────────── */
 
+/** DNS 名字解析 (支持压缩指针)。返回名字结束后的 offset; -1 出错 */
+static int _dns_read_name(const uint8_t *buf, int len, int pos,
+                          char *out, int out_cap) {
+    int out_len = 0;
+    int jump_pos = -1;
+    int guard = 0;
+    while (pos < len && guard++ < 128) {
+        uint8_t seg = buf[pos];
+        if ((seg & 0xC0) == 0xC0) {
+            if (pos + 1 >= len) return -1;
+            if (jump_pos < 0) jump_pos = pos + 2;
+            pos = ((int)(seg & 0x3F) << 8) | (int)buf[pos + 1];
+            continue;
+        }
+        pos++;
+        if (seg == 0) break;
+        if (seg > 63 || pos + seg > len) return -1;
+        if (out_len > 0 && out_len < out_cap - 1) out[out_len++] = '.';
+        for (int i = 0; i < seg && out_len < out_cap - 1; i++)
+            out[out_len++] = (char)buf[pos + i];
+        pos += seg;
+    }
+    if (out_len >= out_cap) out_len = out_cap - 1;
+    out[out_len] = '\0';
+    return (jump_pos >= 0) ? jump_pos : pos;
+}
+
+/** 从实例全名取实例短名 (第一个 '.' 之前)。 */
+static void _instance_short_name(const char *full, char *out, int out_cap) {
+    int i = 0;
+    while (i < out_cap - 1 && full[i] != '\0' && full[i] != '.') {
+        out[i] = full[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+
+/** SRV 记录: 实例全名 → 目标主机名 + 端口 */
+typedef struct {
+    char     inst[128];
+    char     target[128];
+    uint16_t port;
+} MdnsSrv;
+
+/** A 记录: 主机名 → IPv4 */
+typedef struct {
+    char host[128];
+    char ip[16];
+} MdnsAddr;
+
+/**
+ * 解析一个 mDNS 响应包: PTR(实例) → SRV(端口+目标) → A(真实 IPv4)。
+ * 旧实现只读 PTR 并把地址填成 "mdns:NAME.local" (无法被 inet_pton/gethostbyname
+ * 解析), 导致扫描出的设备永远连不上; 这里补全 SRV + A 记录解析。
+ */
 static int _parse_mdns_response(const uint8_t *buf, int len,
                                 WifiConnectionInfo *results, int max_count) {
     if (len < 12) return 0;
-    int ancount = ((buf[6] << 8) | buf[7]);  /* Answer RRs */
+    uint16_t qdcount = (uint16_t)((buf[4] << 8) | buf[5]);
+    uint16_t ancount  = (uint16_t)((buf[6] << 8) | buf[7]);
+    uint16_t nscount  = (uint16_t)((buf[8] << 8) | buf[9]);
+    uint16_t arcount  = (uint16_t)((buf[10] << 8) | buf[11]);
+    int total = (int)ancount + (int)nscount + (int)arcount;
+    if (total <= 0) return 0;
 
-    /* 跳过 12-byte 头 + question section */
+    /* 跳过 question section */
     int pos = 12;
-    while (pos < len && buf[pos] != 0) {
-        int seg = buf[pos];
-        pos += 1 + seg;
+    for (int q = 0; q < qdcount; q++) {
+        char tmp[128];
+        pos = _dns_read_name(buf, len, pos, tmp, sizeof(tmp));
+        if (pos < 0 || pos + 4 > len) return 0;
+        pos += 4; /* QTYPE + QCLASS */
     }
-    if (pos >= len) return 0;
-    pos++;  /* null terminator */
-    pos += 4; /* QTYPE + QCLASS */
 
-    int found = 0;
-    for (int a = 0; a < ancount && found < max_count && pos + 10 < len; a++) {
-        /* 跳过 name (可能是压缩指针) */
-        if ((buf[pos] & 0xC0) == 0xC0) {
-            pos += 2;
-        } else {
-            while (pos < len && buf[pos] != 0) pos += 1 + buf[pos];
-            pos++;
+    char     ptr_names[HAL_WIFI_MAX_DEVICES][128];
+    int      ptr_count = 0;
+    MdnsSrv  srvs[HAL_WIFI_MAX_DEVICES];
+    int      srv_count = 0;
+    MdnsAddr addrs[HAL_WIFI_MAX_DEVICES];
+    int      addr_count = 0;
+
+    for (int r = 0; r < total; r++) {
+        char name[128];
+        pos = _dns_read_name(buf, len, pos, name, sizeof(name));
+        if (pos < 0 || pos + 10 > len) break;
+
+        uint16_t rtype = (uint16_t)((buf[pos] << 8) | buf[pos + 1]); pos += 2;
+        /* rclass */ pos += 2;
+        /* ttl    */ pos += 4;
+        uint16_t rdlen = (uint16_t)((buf[pos] << 8) | buf[pos + 1]); pos += 2;
+        if (pos + rdlen > len) break;
+        const uint8_t *rdata = buf + pos;
+        pos += rdlen;
+
+        switch (rtype) {
+        case 0x0C: /* PTR: 服务类型 → 实例全名 */
+            if (ptr_count < HAL_WIFI_MAX_DEVICES) {
+                char target[128];
+                int tpos = _dns_read_name(buf, len, (int)(rdata - buf),
+                                          target, sizeof(target));
+                if (tpos > 0) {
+                    snprintf(ptr_names[ptr_count], sizeof(ptr_names[ptr_count]),
+                             "%s", target);
+                    ptr_count++;
+                }
+            }
+            break;
+
+        case 0x21: /* SRV: prio(2) weight(2) port(2) target(name) */
+            if (rdlen >= 7 && srv_count < HAL_WIFI_MAX_DEVICES) {
+                uint16_t port = (uint16_t)((rdata[4] << 8) | rdata[5]);
+                char target[128];
+                int tpos = _dns_read_name(buf, len, (int)(rdata - buf) + 6,
+                                          target, sizeof(target));
+                if (tpos > 0) {
+                    snprintf(srvs[srv_count].inst, sizeof(srvs[srv_count].inst),
+                             "%s", name);
+                    snprintf(srvs[srv_count].target, sizeof(srvs[srv_count].target),
+                             "%s", target);
+                    srvs[srv_count].port = port;
+                    srv_count++;
+                }
+            }
+            break;
+
+        case 0x01: /* A: IPv4 */
+            if (rdlen == 4 && addr_count < HAL_WIFI_MAX_DEVICES) {
+                snprintf(addrs[addr_count].ip, sizeof(addrs[addr_count].ip),
+                         "%u.%u.%u.%u", rdata[0], rdata[1], rdata[2], rdata[3]);
+                snprintf(addrs[addr_count].host, sizeof(addrs[addr_count].host),
+                         "%s", name);
+                addr_count++;
+            }
+            break;
+
+        default:
+            break;
         }
-        if (pos + 10 > len) break;
+    }
 
-        uint16_t rtype  = (uint16_t)((buf[pos] << 8) | buf[pos + 1]);
-        pos += 2;
-        uint16_t rclass = (uint16_t)((buf[pos] << 8) | buf[pos + 1]);
-        pos += 2;
-        /* TTL */
-        pos += 4;
-        uint16_t rdlen  = (uint16_t)((buf[pos] << 8) | buf[pos + 1]);
-        pos += 2;
-
-        if (rtype == 0x0C && rclass == 0x0001 && rdlen > 0 && pos + rdlen <= len) {
-            /* PTR record → instance name */
-            int name_start = pos;
-            /* 提取 instance 名称 (第一个 label) */
-            int seg_len = buf[name_start];
-            char name_buf[128] = {0};
-            if (seg_len > 0 && seg_len < 63) {
-                int nlen = (seg_len < (int)sizeof(name_buf) - 1) ? seg_len : (int)sizeof(name_buf) - 1;
-                memcpy(name_buf, buf + name_start + 1, (size_t)nlen);
-                snprintf(results[found].ip_address, sizeof(results[found].ip_address),
-                         "mdns:%s.local", name_buf);
-                results[found].port = NIKON_WIFI_DEFAULT_PORT;
-                results[found].ssid[0] = '\0';
-                found++;
+    /* 组装: 实例名 → SRV 端口/目标 → A 地址 */
+    int found = 0;
+    for (int i = 0; i < ptr_count && found < max_count; i++) {
+        const MdnsSrv *srv = NULL;
+        for (int j = 0; j < srv_count; j++) {
+            if (strcasecmp(srvs[j].inst, ptr_names[i]) == 0) {
+                srv = &srvs[j];
+                break;
             }
         }
-        pos += rdlen;
+        if (!srv) continue;
+
+        char ip[16] = {0};
+        for (int j = 0; j < addr_count; j++) {
+            if (strcasecmp(addrs[j].host, srv->target) == 0) {
+                snprintf(ip, sizeof(ip), "%s", addrs[j].ip);
+                break;
+            }
+        }
+        if (ip[0] == '\0') continue;
+
+        snprintf(results[found].ip_address, sizeof(results[found].ip_address),
+                 "%s", ip);
+        results[found].port = srv->port ? srv->port : NIKON_WIFI_DEFAULT_PORT;
+        _instance_short_name(ptr_names[i], results[found].ssid,
+                             sizeof(results[found].ssid));
+        found++;
     }
     return found;
 }
@@ -183,20 +300,40 @@ int hal_wifi_scan(const char *filter_prefix,
     sendto(mdns_fd, query, (size_t)qlen, 0,
            (struct sockaddr *)&mcast, sizeof(mcast));
 
-    /* 设置接收超时 */
-    struct timeval tv = { .tv_sec = MDNS_SCAN_TIMEOUT_MS / 1000,
-                          .tv_usec = (MDNS_SCAN_TIMEOUT_MS % 1000) * 1000 };
+    /* 接收超时设为 1s 一段, 总窗口内循环收集 (mDNS 常回复多个包) */
+    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
     setsockopt(mdns_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    /* 收集响应 */
     int found = 0;
-    uint8_t rbuf[1500];
-    struct sockaddr_in from;
-    socklen_t from_len = sizeof(from);
-    ssize_t rlen = recvfrom(mdns_fd, rbuf, sizeof(rbuf), 0,
-                            (struct sockaddr *)&from, &from_len);
-    if (rlen > 0) {
-        found = _parse_mdns_response(rbuf, (int)rlen, results, max_count);
+    uint8_t rbuf[2048];
+    struct timespec t_start, t_now;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+
+    while (found < max_count) {
+        struct sockaddr_in from;
+        socklen_t from_len = sizeof(from);
+        ssize_t rlen = recvfrom(mdns_fd, rbuf, sizeof(rbuf), 0,
+                                (struct sockaddr *)&from, &from_len);
+        if (rlen > 0) {
+            WifiConnectionInfo tmp[HAL_WIFI_MAX_DEVICES];
+            int n = _parse_mdns_response(rbuf, (int)rlen, tmp, HAL_WIFI_MAX_DEVICES);
+            for (int i = 0; i < n && found < max_count; i++) {
+                int dup = 0;
+                for (int j = 0; j < found; j++) {
+                    if (strcmp(tmp[i].ip_address, results[j].ip_address) == 0) {
+                        dup = 1;
+                        break;
+                    }
+                }
+                if (!dup) results[found++] = tmp[i];
+            }
+        }
+
+        clock_gettime(CLOCK_MONOTONIC, &t_now);
+        uint64_t elapsed_ms =
+            (uint64_t)(t_now.tv_sec - t_start.tv_sec) * 1000 +
+            (uint64_t)(t_now.tv_nsec - t_start.tv_nsec) / 1000000;
+        if (elapsed_ms >= MDNS_SCAN_TIMEOUT_MS) break;
     }
 
     close(mdns_fd);

@@ -3,18 +3,24 @@ package com.nikon.app.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.nikon.app.ble.BleManager
 import com.nikon.app.jni.CameraApi
 import com.nikon.app.jni.CameraBridge
 import com.nikon.app.jni.TransferProgressCallback
+import com.nikon.app.settings.SettingsRepository
 import com.nikon.app.storage.StorageManager
+import com.nikon.app.transfer.TransferManager
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,6 +56,30 @@ class CameraViewModel(
     /** 存储管理器: 传输完成后自动保存到系统相册 */
     private val storageManager = StorageManager(application)
 
+    /** BLE 管理器: 相机发现 + 唤醒 (SnapBridge)。在 onCleared 时 close。 */
+    private val bleManager = BleManager(application)
+
+    /** 设置仓库: load/save/键名唯一入口 (v3 从 ViewModel 拆出) */
+    private val settingsRepo = SettingsRepository(application)
+
+    /**
+     * 独立清理协程作用域。
+     * onCleared 后 viewModelScope 随即被取消,在那里 launch 的收尾命令
+     * (如 StopLiveView)大概率执行不完;改用不受其生命周期影响的独立 scope。
+     */
+    private val shutdownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * 缩略图内存缓存 (objectHandle → JPEG 字节)。
+     * 相册网格会为同一文件反复请求缩略图, 缓存避免重复走 PTP GetThumb。
+     * 访问顺序 LRU, 容量上限 128 项, 超过时移除最久未用。
+     */
+    private val thumbnailCache = object : LinkedHashMap<Long, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<Long, ByteArray>?,
+        ): Boolean = size > 128
+    }
+
     /** Service 是否就绪(handle != 0) — UI 层据此守卫按钮 */
     private val _serviceReady = MutableStateFlow(false)
     val serviceReady: StateFlow<Boolean> = _serviceReady.asStateFlow()
@@ -83,15 +113,35 @@ class CameraViewModel(
     private val _errorEvents = kotlinx.coroutines.channels.Channel<String>(capacity = kotlinx.coroutines.channels.Channel.BUFFERED)
     val errorEvents = _errorEvents.receiveAsFlow()
 
-    private val _transferProgress = MutableStateFlow<TransferState?>(null)
-    val transferProgress: StateFlow<TransferState?> = _transferProgress.asStateFlow()
-
-    // ─── 传输任务列表(v2 新增)─────────────────────────────────
-    // 本地维护,native 层无列举接口;发起传输时 add,完成/失败时 update
-    private val _transferJobs = MutableStateFlow<List<TransferJob>>(emptyList())
-    val transferJobs: StateFlow<List<TransferJob>> = _transferJobs.asStateFlow()
-
-    private var nextJobId = 1
+    // ─── 传输任务(v3:状态机整体委托 TransferManager)────────
+    // 任务 id 稳定不替换、进度回调按 nativeJobId 匹配、所有变更原子化,
+    // 详见 TransferManager 类注释。依赖 _settings, 故用 by lazy 延迟创建。
+    private val transferManager: TransferManager by lazy {
+        TransferManager(
+            bridge = bridge,
+            scope = viewModelScope,
+            ioDispatcher = ioDispatcher,
+            handleProvider = { _handle },
+            settingsProvider = { _settings.value },
+            onError = ::reportError,
+            onActiveChanged = { active ->
+                _status.value = if (active) CameraBridge.STATUS_TRANSFERRING
+                                else CameraBridge.STATUS_CONNECTED
+            },
+            onJobDone = { job ->
+                // 完成时自动保存到系统相册(目录取 settings.storageTarget, 支持用户自定义);
+                // 若开启 FTP 自动上传, 再导出到 FTP
+                viewModelScope.launch(ioDispatcher) {
+                    val albumOverride = settingsAlbumDir()
+                    storageManager.saveToGallery(job.destPath, job.filename, albumOverride)
+                    if (_settings.value.ftpAutoUpload) {
+                        exportToFtp(job.destPath)
+                    }
+                }
+            },
+        )
+    }
+    val transferJobs: StateFlow<List<TransferJob>> get() = transferManager.jobs
 
     // ─── 相机参数(v2 新增,轮询读取)──────────────────────────
     private val _cameraProperties = MutableStateFlow(CameraProperties())
@@ -99,9 +149,8 @@ class CameraViewModel(
 
     private var propPollJob: Job? = null
 
-    // ─── App 设置(v2 新增,跨页面共享 + SharedPreferences 持久化)──
-    private val _prefs = application.getSharedPreferences("nikon_settings", android.content.Context.MODE_PRIVATE)
-    private val _settings = MutableStateFlow(loadSettingsFromPrefs())
+    // ─── App 设置(跨页面共享 + SharedPreferences 持久化)──
+    private val _settings = MutableStateFlow(settingsRepo.load())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     // ─── 文件列表(v2 新增)────────────────────────────────────
@@ -120,6 +169,16 @@ class CameraViewModel(
 
     private var lvPollJob: Job? = null
     private var statusPollJob: Job? = null
+
+    // ─── BLE 状态 (SnapBridge 发现 / 唤醒) ────────────────────
+    private val _bleDevices = MutableStateFlow<List<BleManager.Device>>(emptyList())
+    val bleDevices: StateFlow<List<BleManager.Device>> = _bleDevices.asStateFlow()
+
+    private val _bleScanning = MutableStateFlow(false)
+    val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
+
+    val bleSupported: Boolean get() = bleManager.isBleSupported
+    val bleEnabled: Boolean get() = bleManager.isBluetoothEnabled
 
     // ─── 初始化 ───────────────────────────────────────────────
     // 不再自己 nativeCreate,handle 由 CameraService 持有。
@@ -145,19 +204,34 @@ class CameraViewModel(
                 val h = _handle
                 if (h != 0L) {
                     if (!_serviceReady.value) _serviceReady.value = true
-                    // 同步连接状态(native 层可能因 USB 拔出主动断开)
+                    // 双向同步连接状态:
+                    //  - 向上: CameraService 自动连接成功 (USB fd 注入) 后 native 变 CONNECTED。
+                    //    旧逻辑只做降级同步, 导致 UI 永远停留在"未连接"扫描页。
+                    //  - 向下: native 层可能因 USB 拔出主动断开。
                     try {
                         val nativeStatus = withContext(ioDispatcher) {
                             bridge.nativeGetStatus(h)
                         }
-                        // 只在状态确实变化时更新,避免覆盖 ViewModel 主动设的中间态
-                        if (nativeStatus == CameraBridge.STATUS_DISCONNECTED ||
-                            nativeStatus == CameraBridge.STATUS_ERROR) {
-                            if (_status.value == CameraBridge.STATUS_CONNECTED ||
-                                _status.value == CameraBridge.STATUS_TRANSFERRING) {
-                                _status.value = nativeStatus
-                                propPollJob?.cancel()
+                        when (nativeStatus) {
+                            CameraBridge.STATUS_CONNECTED -> {
+                                val local = _status.value
+                                if (local != CameraBridge.STATUS_CONNECTED &&
+                                    local != CameraBridge.STATUS_TRANSFERRING &&
+                                    local != CameraBridge.STATUS_CONNECTING &&
+                                    local != CameraBridge.STATUS_SCANNING) {
+                                    _status.value = CameraBridge.STATUS_CONNECTED
+                                    onNativeConnected(h)
+                                }
                             }
+                            CameraBridge.STATUS_DISCONNECTED,
+                            CameraBridge.STATUS_ERROR -> {
+                                if (_status.value == CameraBridge.STATUS_CONNECTED ||
+                                    _status.value == CameraBridge.STATUS_TRANSFERRING) {
+                                    _status.value = nativeStatus
+                                    propPollJob?.cancel()
+                                }
+                            }
+                            else -> Unit
                         }
                     } catch (_: Exception) { }
                 } else {
@@ -171,16 +245,29 @@ class CameraViewModel(
         }
     }
 
+    /**
+     * native 层进入 CONNECTED 时补齐连接后的初始化 (注册传输进度回调 + 启动参数轮询)。
+     * 手动 connect()/connectWifi() 已各自处理; 这里覆盖 CameraService 自动连接
+     * (USB fd 注入) 路径 — 旧实现漏掉后, 自动连接成功也没有任何进度回调。
+     */
+    private fun onNativeConnected(h: Long) {
+        bridge.nativeRegisterProgressCallback(h, transferProgressCallback)
+        startPropertyPolling()
+    }
+
     override fun onCleared() {
         super.onCleared()
         // 停止所有轮询,但不 destroy handle — 那是 Service 的职责
         propPollJob?.cancel()
         lvPollJob?.cancel()
         statusPollJob?.cancel()
-        // LiveView 如果开着,通知 Service 层停止(通过 handle)
+        bleManager.close()
+        // LiveView 如果开着,通知 Service 层停止(通过 handle)。
+        // 用 shutdownScope: viewModelScope 此刻即将被取消,无法保证命令发出。
         if (_liveViewActive.value && _handle != 0L) {
-            viewModelScope.launch(ioDispatcher) {
-                bridge.nativeStopLiveView(_handle)
+            val h = _handle
+            shutdownScope.launch {
+                bridge.nativeStopLiveView(h)
             }
         }
     }
@@ -194,9 +281,22 @@ class CameraViewModel(
             _cameras.value = emptyList()
             // 保证扫描动画至少显示 3 秒,避免一闪而过
             val scanStart = System.currentTimeMillis()
-            val rawList = withContext(ioDispatcher) {
-                bridge.nativeScan(_handle) ?: emptyArray()
+
+            // Android 默认关闭 Wi-Fi 组播接收, mDNS 发现相机需要持 MulticastLock
+            val wifiManager = getApplication<Application>()
+                .getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            val multicastLock = wifiManager?.createMulticastLock("nikon-connect-scan")
+            multicastLock?.setReferenceCounted(false)
+            try { multicastLock?.acquire() } catch (_: Exception) {}
+
+            val rawList = try {
+                withContext(ioDispatcher) {
+                    bridge.nativeScan(_handle) ?: emptyArray()
+                }
+            } finally {
+                try { multicastLock?.release() } catch (_: Exception) {}
             }
+
             val elapsed = System.currentTimeMillis() - scanStart
             if (elapsed < 3000) {
                 delay(3000 - elapsed)
@@ -226,12 +326,79 @@ class CameraViewModel(
         }
     }
 
+    /**
+     * Wi-Fi 直连相机 PTP/IP 服务。
+     * 手机需已连接到相机热点 (系统设置里连接), 相机 IP 通常为 192.168.1.1, 端口 15740。
+     */
+    fun connectWifi(ip: String, port: Int) {
+        if (!ensureHandle()) return
+        viewModelScope.launch {
+            _status.value = CameraBridge.STATUS_CONNECTING
+            val rc = withContext(ioDispatcher) {
+                bridge.nativeConnectWifi(_handle, ip, port)
+            }
+            if (rc == CameraBridge.CAM_OK) {
+                _status.value = CameraBridge.STATUS_CONNECTED
+                bridge.nativeRegisterProgressCallback(_handle, transferProgressCallback)
+                startPropertyPolling()
+                // 持久化本次连接端点: 供 CameraService WiFi 断连后真正重连使用
+                settingsRepo.saveLastWifiEndpoint(ip, port)
+                // 填充设备信息供仪表盘显示 (Android 上 USB 扫描恒为空)。
+                // 电量/存储用 -1 表示"未知/读取中": Wi-Fi 连接不返回真实值,
+                // 不能填硬编码假数据(如 100%/0GB)误导用户, UI 层对负值显示占位符。
+                _cameras.value = listOf(
+                    CameraInfo("$ip|wifi|$port", "NIKON (WiFi)", ip, 1, -1, -1.0, -1.0)
+                )
+            } else {
+                _status.value = CameraBridge.STATUS_ERROR
+                reportError("Wi-Fi 连接失败 (错误码: $rc)")
+            }
+        }
+    }
+
     fun disconnect() {
         propPollJob?.cancel()
         viewModelScope.launch(ioDispatcher) {
             bridge.nativeDisconnect(_handle)
         }
         _status.value = CameraBridge.STATUS_DISCONNECTED
+    }
+
+    // ─── BLE 发现 / 唤醒 ───────────────────────────────────────
+
+    /** 启动 BLE 扫描 (结果流入 bleDevices)。 */
+    fun startBleScan() {
+        _bleDevices.value = emptyList()
+        _bleScanning.value = true
+        val started = bleManager.startScan { device ->
+            if (device.isNikon) {
+                // 原子去重后追加 (扫描回调线程与主线程可能并发)
+                _bleDevices.update { cur ->
+                    if (cur.none { it.address == device.address }) cur + device else cur
+                }
+            }
+        }
+        if (!started) {
+            _bleScanning.value = false
+            reportError("BLE 扫描启动失败, 请检查蓝牙是否开启")
+        }
+    }
+
+    /** 停止 BLE 扫描。 */
+    fun stopBleScan() {
+        bleManager.stopScan()
+        _bleScanning.value = false
+    }
+
+    /** 连接 BLE 设备并尝试唤醒 (结果通过 error 通道反馈)。 */
+    fun connectBleWake(address: String) {
+        bleManager.connectAndWake(address) { ok, msg ->
+            if (ok) {
+                viewModelScope.launch { _errorEvents.send("BLE: $msg") }
+            } else {
+                reportError("BLE 唤醒失败: $msg")
+            }
+        }
     }
 
     // ─── 拍摄控制 ─────────────────────────────────────────────
@@ -249,6 +416,7 @@ class CameraViewModel(
     }
 
     fun captureBurst(count: Int, intervalMs: Int = 0) {
+        if (!ensureHandle()) return
         viewModelScope.launch {
             withContext(ioDispatcher) {
                 bridge.nativeCaptureBurst(_handle, count, intervalMs)
@@ -291,32 +459,43 @@ class CameraViewModel(
         }
     }
 
+    /** 参数轮询一次批量读取的属性码(顺序与 vals 下标一一对应) */
+    private val pollPropIds = intArrayOf(
+        CameraBridge.PROP_SHUTTER_SPEED,
+        CameraBridge.PROP_APERTURE,
+        CameraBridge.PROP_ISO,
+        CameraBridge.PROP_EXPOSURE_COMP,
+        CameraBridge.PROP_FOCUS_MODE,
+        CameraBridge.PROP_WHITE_BALANCE,
+        CameraBridge.PROP_IMAGE_QUALITY,
+    )
+
     /**
      * 连接成功后启动参数轮询,每 2s 刷新一次拍摄参数。
      * UI 通过 cameraProperties StateFlow 观察。
+     * v3: 七个属性改为单次批量 JNI 调用 (旧版 7 次独立跨边界调用)。
      */
     private fun startPropertyPolling() {
         propPollJob?.cancel()
         propPollJob = viewModelScope.launch {
             while (isActive && _status.value == CameraBridge.STATUS_CONNECTED) {
                 try {
-                    val shutter = getProperty(CameraBridge.PROP_SHUTTER_SPEED)
-                    val aperture = getProperty(CameraBridge.PROP_APERTURE)
-                    val iso = getProperty(CameraBridge.PROP_ISO)
-                    val ev = getProperty(CameraBridge.PROP_EXPOSURE_COMP)
-                    val focus = getProperty(CameraBridge.PROP_FOCUS_MODE)
-                    val wb = getProperty(CameraBridge.PROP_WHITE_BALANCE)
-                    val quality = getProperty(CameraBridge.PROP_IMAGE_QUALITY)
-
-                    _cameraProperties.value = _cameraProperties.value.copy(
-                        shutterSpeed = formatShutter(shutter),
-                        aperture = formatAperture(aperture),
-                        iso = formatIso(iso),
-                        ev = formatEv(ev),
-                        focusMode = formatFocusMode(focus),
-                        whiteBalance = formatWb(wb),
-                        imageQuality = formatQuality(quality),
-                    )
+                    if (_handle != 0L) {
+                        val vals = withContext(ioDispatcher) {
+                            bridge.nativeGetProperties(_handle, pollPropIds)
+                        }
+                        if (vals != null && vals.size == pollPropIds.size) {
+                            _cameraProperties.value = _cameraProperties.value.copy(
+                                shutterSpeed = formatShutter(vals[0]),
+                                aperture = formatAperture(vals[1]),
+                                iso = formatIso(vals[2]),
+                                ev = formatEv(vals[3]),
+                                focusMode = formatFocusMode(vals[4]),
+                                whiteBalance = formatWb(vals[5]),
+                                imageQuality = formatQuality(vals[6]),
+                            )
+                        }
+                    }
                 } catch (e: Exception) {
                     // native 调用失败,保持上次值
                 }
@@ -327,224 +506,61 @@ class CameraViewModel(
 
     // ─── 文件传输 ─────────────────────────────────────────────
 
-    /** 传输进度回调对象(native 层通过 JNI 回调) */
+    /** 传输进度回调对象(native 层通过 JNI 回调),转发给 TransferManager */
     private val transferProgressCallback = object : TransferProgressCallback {
         override fun onProgress(jobId: Int, speedMbps: Double, percent: Int, status: Int) {
-            val mappedStatus = when (status) {
-                2    -> TransferStatus.DONE
-                -1   -> TransferStatus.FAILED
-                else -> TransferStatus.ACTIVE
-            }
-            val note = when (mappedStatus) {
-                TransferStatus.DONE   -> "完成"
-                TransferStatus.FAILED -> "传输失败"
-                else                  -> "传输中"
-            }
-            updateJob(jobId) { it.copy(percent = percent, speedMbps = speedMbps, status = mappedStatus, note = note) }
-
-            // 完成时自动保存到系统相册
-            if (mappedStatus == TransferStatus.DONE) {
-                val job = _transferJobs.value.firstOrNull { it.id == jobId }
-                if (job != null) {
-                    viewModelScope.launch(ioDispatcher) {
-                        storageManager.saveToGallery(job.destPath, job.filename)
-                    }
-                }
-            }
-
-            // 完成或失败时 promote 下一个
-            if (mappedStatus == TransferStatus.DONE || mappedStatus == TransferStatus.FAILED) {
-                promoteNextWaiting()
-                if (_transferJobs.value.none { it.status == TransferStatus.ACTIVE }) {
-                    _status.value = CameraBridge.STATUS_CONNECTED
-                }
-            }
+            transferManager.onNativeProgress(jobId, speedMbps, percent, status)
         }
     }
 
     fun startTransfer(objectHandle: Long, destPath: String) {
         if (!ensureHandle()) return
-        // 并发控制:活跃任务数 >= concurrentJobs 时排队 WAITING
-        val activeCount = _transferJobs.value.count { it.status == TransferStatus.ACTIVE }
-        if (activeCount >= _settings.value.concurrentJobs) {
-            // 排队:用负数 id 占位(native 还没启动)
-            val tempId = -(nextJobId++)
-            val job = TransferJob(
-                id = tempId,
-                objectHandle = objectHandle,
-                destPath = destPath,
-                filename = destPath.substringAfterLast('/'),
-                status = TransferStatus.WAITING,
-                percent = 0,
-                speedMbps = 0.0,
-                note = "等待中",
-            )
-            _transferJobs.value = _transferJobs.value + job
-            return
-        }
-
-        _status.value = CameraBridge.STATUS_TRANSFERRING
-        launchNativeTransfer(objectHandle, destPath)
-    }
-
-    /** 调 nativeStartTransfer,用返回的 nativeJobId 创建 ACTIVE job */
-    private fun launchNativeTransfer(objectHandle: Long, destPath: String) {
-        viewModelScope.launch {
-            val nativeJobId = withContext(ioDispatcher) {
-                bridge.nativeStartTransfer(_handle, objectHandle, destPath)
-            }
-            if (nativeJobId < 0) {
-                reportError("传输失败 (错误码: $nativeJobId)")
-                _transferJobs.value = _transferJobs.value + TransferJob(
-                    id = nextJobId++,
-                    objectHandle = objectHandle,
-                    destPath = destPath,
-                    filename = destPath.substringAfterLast('/'),
-                    status = TransferStatus.FAILED,
-                    percent = 0,
-                    speedMbps = 0.0,
-                    note = "传输失败 (错误码: $nativeJobId)",
-                )
-            } else {
-                // 用 nativeJobId 创建 job,progress 回调会持续更新
-                _transferJobs.value = _transferJobs.value + TransferJob(
-                    id = nativeJobId,
-                    objectHandle = objectHandle,
-                    destPath = destPath,
-                    filename = destPath.substringAfterLast('/'),
-                    status = TransferStatus.ACTIVE,
-                    percent = 0,
-                    speedMbps = 0.0,
-                    note = "传输中",
-                )
-            }
-            promoteNextWaiting()
-            if (_transferJobs.value.none { it.status == TransferStatus.ACTIVE }) {
-                _status.value = CameraBridge.STATUS_CONNECTED
-            }
-        }
-    }
-
-    /** 把队列里第一个 WAITING 任务提升为 ACTIVE 并启动(带并发校验) */
-    private fun promoteNextWaiting() {
-        val activeCount = _transferJobs.value.count { it.status == TransferStatus.ACTIVE }
-        if (activeCount >= _settings.value.concurrentJobs) return
-        val next = _transferJobs.value.firstOrNull { it.status == TransferStatus.WAITING } ?: return
-        // 标记为 ACTIVE(保留 tempId,启动成功后会用 nativeJobId 替换)
-        updateJob(next.id) { it.copy(status = TransferStatus.ACTIVE, note = "传输中") }
-        viewModelScope.launch {
-            val nativeJobId = withContext(ioDispatcher) {
-                bridge.nativeStartTransfer(_handle, next.objectHandle, next.destPath)
-            }
-            if (nativeJobId < 0) {
-                updateJob(next.id) { it.copy(status = TransferStatus.FAILED, note = "传输失败 (错误码: $nativeJobId)") }
-                reportError("传输失败 (错误码: $nativeJobId)")
-            } else {
-                // 用 nativeJobId 替换 tempId
-                _transferJobs.value = _transferJobs.value.map {
-                    if (it.id == next.id) it.copy(id = nativeJobId) else it
-                }
-            }
-            promoteNextWaiting()
-            if (_transferJobs.value.none { it.status == TransferStatus.ACTIVE }) {
-                _status.value = CameraBridge.STATUS_CONNECTED
-            }
-        }
+        transferManager.startTransfer(objectHandle, destPath)
     }
 
     fun cancelTransfer(jobId: Int) {
-        if (jobId > 0 && _handle != 0L) {
-            viewModelScope.launch(ioDispatcher) {
-                bridge.nativeCancelTransfer(_handle, jobId)
-            }
-        }
-        updateJob(jobId) { it.copy(status = TransferStatus.CANCELLED, note = "已取消") }
-        promoteNextWaiting()
+        transferManager.cancelTransfer(jobId)
     }
 
     /** 全部暂停:native 层无 pause 语义,等同于取消所有活跃任务 */
     fun pauseAllTransfers() {
-        val active = _transferJobs.value.filter { it.status == TransferStatus.ACTIVE }
-        active.forEach { job ->
-            if (job.id > 0 && _handle != 0L) {
-                viewModelScope.launch(ioDispatcher) {
-                    bridge.nativeCancelTransfer(_handle, job.id)
-                }
-            }
-            updateJob(job.id) { it.copy(status = TransferStatus.PAUSED, note = "已暂停") }
-        }
+        transferManager.pauseAllTransfers()
     }
 
     /** 全部取消:取消所有非完成态任务 */
     fun cancelAllTransfers() {
-        val cancellable = _transferJobs.value.filter {
-            it.status == TransferStatus.ACTIVE || it.status == TransferStatus.PAUSED || it.status == TransferStatus.WAITING
-        }
-        cancellable.forEach { job ->
-            if (job.id > 0 && _handle != 0L) {
-                viewModelScope.launch(ioDispatcher) {
-                    bridge.nativeCancelTransfer(_handle, job.id)
-                }
-            }
-            updateJob(job.id) { it.copy(status = TransferStatus.CANCELLED, note = "已取消") }
-        }
+        transferManager.cancelAllTransfers()
     }
 
     /** 断点续传:重新对同一 objectHandle 发起传输(native 层支持 offset 续传) */
     fun resumeTransfer(jobId: Int) {
-        val job = _transferJobs.value.firstOrNull { it.id == jobId } ?: return
-        // 用负数 tempId 占位,启动后替换为 nativeJobId
-        val tempId = -(nextJobId++)
-        _transferJobs.value = _transferJobs.value + job.copy(id = tempId, status = TransferStatus.ACTIVE, percent = job.percent, note = "断点续传中")
-        // 移除旧 job
-        _transferJobs.value = _transferJobs.value.filterNot { it.id == jobId }
-        _status.value = CameraBridge.STATUS_TRANSFERRING
-        viewModelScope.launch {
-            val nativeJobId = withContext(ioDispatcher) {
-                bridge.nativeStartTransfer(_handle, job.objectHandle, job.destPath)
-            }
-            if (nativeJobId < 0) {
-                updateJob(tempId) { it.copy(status = TransferStatus.FAILED, note = "续传失败 (错误码: $nativeJobId)") }
-                reportError("续传失败 (错误码: $nativeJobId)")
-            } else {
-                _transferJobs.value = _transferJobs.value.map {
-                    if (it.id == tempId) it.copy(id = nativeJobId) else it
-                }
-            }
-            if (_transferJobs.value.none { it.status == TransferStatus.ACTIVE }) {
-                _status.value = CameraBridge.STATUS_CONNECTED
-            }
-        }
+        transferManager.resumeTransfer(jobId)
     }
 
     /** 重新传输:从头开始 */
     fun retryTransfer(jobId: Int) {
-        val job = _transferJobs.value.firstOrNull { it.id == jobId } ?: return
-        val tempId = -(nextJobId++)
-        _transferJobs.value = _transferJobs.value + job.copy(id = tempId, status = TransferStatus.ACTIVE, percent = 0, note = "重新传输中")
-        _transferJobs.value = _transferJobs.value.filterNot { it.id == jobId }
-        _status.value = CameraBridge.STATUS_TRANSFERRING
-        viewModelScope.launch {
-            val nativeJobId = withContext(ioDispatcher) {
-                bridge.nativeStartTransfer(_handle, job.objectHandle, job.destPath)
-            }
-            if (nativeJobId < 0) {
-                updateJob(tempId) { it.copy(status = TransferStatus.FAILED, note = "重传失败 (错误码: $nativeJobId)") }
-                reportError("重传失败 (错误码: $nativeJobId)")
-            } else {
-                _transferJobs.value = _transferJobs.value.map {
-                    if (it.id == tempId) it.copy(id = nativeJobId) else it
-                }
-            }
-            if (_transferJobs.value.none { it.status == TransferStatus.ACTIVE }) {
-                _status.value = CameraBridge.STATUS_CONNECTED
-            }
-        }
+        transferManager.retryTransfer(jobId)
     }
 
-    private fun updateJob(jobId: Int, transform: (TransferJob) -> TransferJob) {
-        _transferJobs.value = _transferJobs.value.map {
-            if (it.id == jobId) transform(it) else it
+    // ─── FTP 自动化 ────────────────────────────────────────────
+
+    /**
+     * 将本地文件异步上传到 FTP (先按当前设置下发 FtpConfig, 再导出)。
+     * 用户名为空时 C 层回退为 anonymous 登录。
+     */
+    fun exportToFtp(localPath: String) {
+        if (_handle == 0L) return
+        viewModelScope.launch(ioDispatcher) {
+            val s = _settings.value
+            bridge.nativeSetFtpConfig(
+                _handle, s.ftpHost, s.ftpPort,
+                s.ftpUsername, s.ftpPassword, s.ftpRemotePath,
+                s.ftpsEncryption, s.ftpAutoUpload,
+            )
+            val rc = bridge.nativeExportToFtp(_handle, localPath)
+            if (rc != CameraBridge.CAM_OK) {
+                reportError("FTP 上传失败 (错误码: $rc)")
+            }
         }
     }
 
@@ -552,56 +568,11 @@ class CameraViewModel(
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
         _settings.value = transform(_settings.value)
-        saveSettingsToPrefs(_settings.value)
+        settingsRepo.save(_settings.value)
     }
 
-    private fun loadSettingsFromPrefs(): AppSettings {
-        return AppSettings(
-            autoTransfer    = _prefs.getBoolean("autoTransfer", true),
-            concurrentJobs  = _prefs.getInt("concurrentJobs", 3),
-            formatJpg       = _prefs.getBoolean("formatJpg", true),
-            formatNef       = _prefs.getBoolean("formatNef", true),
-            formatMov       = _prefs.getBoolean("formatMov", false),
-            autoChunk       = _prefs.getBoolean("autoChunk", true),
-            speedAdaptive   = _prefs.getBoolean("speedAdaptive", true),
-            smallFileFirst  = _prefs.getBoolean("smallFileFirst", true),
-            resumeTransfer  = _prefs.getBoolean("resumeTransfer", true),
-            ftpsEncryption  = _prefs.getBoolean("ftpsEncryption", true),
-            ftpAutoUpload   = _prefs.getBoolean("ftpAutoUpload", false),
-            preferUsb       = _prefs.getBoolean("preferUsb", true),
-            notifyComplete  = _prefs.getBoolean("notifyComplete", true),
-            notifyFail      = _prefs.getBoolean("notifyFail", true),
-            ftpHost         = _prefs.getString("ftpHost", "192.168.1.100") ?: "192.168.1.100",
-            ftpPort         = _prefs.getInt("ftpPort", 21),
-            storageTarget      = _prefs.getString("storageTarget", "/DCIM/NikonConnect") ?: "/DCIM/NikonConnect",
-            transferBlockSize  = _prefs.getString("transferBlockSize", "自动") ?: "自动",
-            wifiPollIntervalMs = _prefs.getInt("wifiPollIntervalMs", 1000),
-        )
-    }
-
-    private fun saveSettingsToPrefs(s: AppSettings) {
-        _prefs.edit().apply {
-            putBoolean("autoTransfer", s.autoTransfer)
-            putInt("concurrentJobs", s.concurrentJobs)
-            putBoolean("formatJpg", s.formatJpg)
-            putBoolean("formatNef", s.formatNef)
-            putBoolean("formatMov", s.formatMov)
-            putBoolean("autoChunk", s.autoChunk)
-            putBoolean("speedAdaptive", s.speedAdaptive)
-            putBoolean("smallFileFirst", s.smallFileFirst)
-            putBoolean("resumeTransfer", s.resumeTransfer)
-            putBoolean("ftpsEncryption", s.ftpsEncryption)
-            putBoolean("ftpAutoUpload", s.ftpAutoUpload)
-            putBoolean("preferUsb", s.preferUsb)
-            putBoolean("notifyComplete", s.notifyComplete)
-            putBoolean("notifyFail", s.notifyFail)
-            putString("ftpHost", s.ftpHost)
-            putInt("ftpPort", s.ftpPort)
-            putString("storageTarget", s.storageTarget)
-            putString("transferBlockSize", s.transferBlockSize)
-            putInt("wifiPollIntervalMs", s.wifiPollIntervalMs)
-        }.apply()
-    }
+    /** 加密存储是否可用(FTP 密码安全落盘)。不可用 → UI 显示安全警告。 */
+    val secretStorageAvailable: Boolean get() = settingsRepo.isSecretStorageAvailable()
 
     // ─── 文件列举 / 缩略图 / 删除 ─────────────────────────────
 
@@ -630,16 +601,55 @@ class CameraViewModel(
         return "${dir.absolutePath}/NikonConnect/$filename"
     }
 
+    /**
+     * 从 settings.storageTarget (如 "/DCIM/NikonConnect") 解析相册子目录名。
+     * 用户可自定义保存目录; 无法解析时回退默认 "NikonConnect"。
+     */
+    private fun settingsAlbumDir(): String {
+        val raw = _settings.value.storageTarget.trim()
+        return raw.substringAfterLast('/').takeIf { it.isNotBlank() }
+            ?: com.nikon.app.storage.StorageManager.DEFAULT_ALBUM_DIR
+    }
+
     /** 便捷方法:用 app 私有目录作为传输目标 */
     fun startTransferToApp(objectHandle: Long, filename: String) {
         startTransfer(objectHandle, buildDestPath(filename))
     }
 
-    /** 获取缩略图 JPEG 字节(挂起,UI 侧用 rememberAsyncImage 或 BitmapFactory 解码) */
+    /** 获取缩略图 JPEG 字节(挂起,UI 侧用 rememberAsyncImage 或 BitmapFactory 解码)。
+     *  命中缓存直接返回, 未命中则走 nativeGetThumbnail 并写缓存。 */
     suspend fun getThumbnail(objectHandle: Long): ByteArray? {
+        thumbnailCache[objectHandle]?.let { return it }
         if (_handle == 0L) return null
-        return withContext(ioDispatcher) {
+        val bytes = withContext(ioDispatcher) {
             bridge.nativeGetThumbnail(_handle, objectHandle)
+        } ?: return null
+        thumbnailCache[objectHandle] = bytes
+        return bytes
+    }
+
+    /**
+     * 读取相机当前 Picture Control 参数 (PTP 0x90CC)。
+     * @return 解码后的参数; 未连接/失败返回 null
+     */
+    suspend fun getPictureControl(): PictureControl? {
+        if (_handle == 0L) return null
+        val raw = withContext(ioDispatcher) { bridge.nativeGetPictCtrl(_handle) }
+            ?: return null
+        return PictureControl.fromBytes(raw)
+    }
+
+    /**
+     * 写入 Picture Control 参数 (PTP 0x90CD)。
+     * 与 setProperty 一致: 内部起协程, 失败写 error。
+     */
+    fun applyPictureControl(pc: PictureControl) {
+        if (!ensureHandle()) return
+        viewModelScope.launch(ioDispatcher) {
+            val rc = bridge.nativeSetPictCtrl(_handle, pc.toBytes())
+            if (rc != CameraBridge.CAM_OK) {
+                reportError("应用预设失败 (错误码: $rc)")
+            }
         }
     }
 
@@ -648,7 +658,7 @@ class CameraViewModel(
         viewModelScope.launch(ioDispatcher) {
             val rc = bridge.nativeDeleteFile(_handle, objectHandle)
             if (rc == CameraBridge.CAM_OK) {
-                _fileList.value = _fileList.value.filterNot { it.objectHandle == objectHandle }
+                _fileList.update { it.filterNot { f -> f.objectHandle == objectHandle } }
             } else {
                 reportError("删除失败 (错误码: $rc)")
             }
@@ -686,6 +696,11 @@ class CameraViewModel(
     /**
      * 帧轮询:~30fps,delay(33ms)。nativeGetLiveViewFrame 同步阻塞取一帧 JPEG。
      * 每帧更新 liveViewFrame StateFlow,UI 侧 collect 后 BitmapFactory 解码渲染。
+     *
+     * 注:曾尝试做"UI 消费完上一帧才取下一帧"的背压节流,但因依赖 UI 侧回调,
+     * 一旦 UI 因任何原因(帧未渲染/组件未挂载/Activity 退后台)未消费,取帧循环
+     * 会永久停摆、LiveView 彻底卡死。故回退为固定 ~30fps 简单轮询,让 StateFlow
+     * 自动合并中间帧,兼顾实时性与稳定性。
      */
     private fun startLiveViewPolling() {
         lvPollJob?.cancel()
@@ -697,7 +712,7 @@ class CameraViewModel(
                 if (frame != null && frame.isNotEmpty()) {
                     _liveViewFrame.value = frame
                 }
-                delay(33)  // ~30fps
+                delay(33)  // 目标 ~30fps
             }
         }
     }
@@ -754,148 +769,5 @@ class CameraViewModel(
         2 -> "RAW + JPEG"
         3 -> "TIFF"
         else -> "RAW"
-    }
-}
-
-// ─── 数据类 ──────────────────────────────────────────────────
-
-data class CameraInfo(
-    val id: String,
-    val model: String,
-    val serial: String,
-    val transport: Int,       // 0=USB 1=Wi-Fi
-    val batteryLevel: Int,
-    val storageFreeGb: Double,
-    val storageTotalGb: Double,
-) {
-    val transportLabel: String get() = if (transport == 0) "USB" else "Wi-Fi"
-
-    companion object {
-        fun fromRaw(raw: String): CameraInfo? {
-            val parts = raw.split("|")
-            if (parts.size < 7) return null
-            return runCatching {
-                CameraInfo(
-                    id             = parts[0],
-                    model          = parts[1],
-                    serial         = parts[2],
-                    transport      = parts[3].toInt(),
-                    batteryLevel   = parts[4].toInt(),
-                    storageFreeGb  = parts[5].toDouble(),
-                    storageTotalGb = parts[6].toDouble(),
-                )
-            }.getOrNull()
-        }
-    }
-}
-
-data class TransferState(
-    val jobId: Int,
-    val filename: String,
-    val percent: Int,
-    val speedMbps: Double,
-    val status: Int,  // 0=等待 1=传输中 2=完成 -1=失败
-)
-
-/** 传输任务(v2) */
-data class TransferJob(
-    val id: Int,
-    val objectHandle: Long,
-    val destPath: String,
-    val filename: String,
-    val format: String = "NEF",    // UI 推断或从文件名解析
-    val sizeMb: Double = 0.0,
-    val status: TransferStatus,
-    val percent: Int,
-    val speedMbps: Double,
-    val note: String,
-)
-
-enum class TransferStatus {
-    WAITING, ACTIVE, PAUSED, DONE, FAILED, CANCELLED
-}
-
-/** 相机拍摄参数(v2) */
-data class CameraProperties(
-    val shutterSpeed: String = "--",
-    val aperture: String = "--",
-    val iso: String = "--",
-    val ev: String = "--",
-    val focusMode: String = "--",
-    val whiteBalance: String = "--",
-    val imageQuality: String = "--",
-)
-
-/** App 设置(v2,跨页面共享;持久化待下一阶段) */
-data class AppSettings(
-    val autoTransfer: Boolean = true,
-    val concurrentJobs: Int = 3,
-    val formatJpg: Boolean = true,
-    val formatNef: Boolean = true,
-    val formatMov: Boolean = false,
-    val autoChunk: Boolean = true,
-    val speedAdaptive: Boolean = true,
-    val smallFileFirst: Boolean = true,
-    val resumeTransfer: Boolean = true,
-    val ftpsEncryption: Boolean = true,
-    val ftpAutoUpload: Boolean = false,
-    val preferUsb: Boolean = true,
-    val notifyComplete: Boolean = true,
-    val notifyFail: Boolean = true,
-    val ftpHost: String = "192.168.1.100",
-    val ftpPort: Int = 21,
-    val storageTarget: String = "/DCIM/NikonConnect",
-    val transferBlockSize: String = "自动",
-    val wifiPollIntervalMs: Int = 1000,
-)
-
-/** 相机文件(v2,对应 C 层 FileInfo) */
-data class CameraFile(
-    val objectHandle: Long,
-    val filename: String,
-    val size: Long,
-    val datetime: String,
-    val isRaw: Boolean,
-    val isJpeg: Boolean,
-    val width: Int,
-    val height: Int,
-    val storageId: Int,
-) {
-    /** 文件格式标签:NEF / JPG / 其他 */
-    val format: String get() = when {
-        isRaw -> "NEF"
-        isJpeg -> "JPG"
-        else -> filename.substringAfterLast('.', "").uppercase()
-    }
-
-    /** 人类可读大小 */
-    val sizeLabel: String get() = when {
-        size >= 1024 * 1024 -> "%.1f MB".format(size / (1024.0 * 1024.0))
-        size >= 1024 -> "%.1f KB".format(size / 1024.0)
-        else -> "$size B"
-    }
-
-    /** 日期分组标签(取 datetime 前 10 位 "YYYY-MM-DD") */
-    val dateGroup: String get() = datetime.take(10)
-
-    companion object {
-        /** 解析 JNI 返回的 "handle|name|size|datetime|is_raw|is_jpeg|w|h|storage" */
-        fun fromRaw(raw: String): CameraFile? {
-            val p = raw.split("|")
-            if (p.size < 9) return null
-            return runCatching {
-                CameraFile(
-                    objectHandle = p[0].toLong(),
-                    filename     = p[1],
-                    size         = p[2].toLong(),
-                    datetime     = p[3],
-                    isRaw        = p[4] == "1",
-                    isJpeg       = p[5] == "1",
-                    width        = p[6].toInt(),
-                    height       = p[7].toInt(),
-                    storageId    = p[8].toInt(),
-                )
-            }.getOrNull()
-        }
     }
 }

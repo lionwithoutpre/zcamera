@@ -31,8 +31,8 @@ import com.nikon.app.ui.theme.*
 @Composable
 fun StatusCapsule(
     status: Int,
-    modelName: String? = null,
     modifier: Modifier = Modifier,
+    modelName: String? = null,
 ) {
     val (dotColor, label, borderColor) = when (status) {
         CameraBridge.STATUS_SCANNING -> Triple(

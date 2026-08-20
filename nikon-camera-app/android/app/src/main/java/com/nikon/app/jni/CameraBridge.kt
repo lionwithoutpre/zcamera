@@ -30,6 +30,8 @@ object CameraBridge : CameraApi {
     override external fun nativeConnect(handle: Long, cameraId: String): Int
     /** 使用已获取权限的 USB fd 连接 (Android 专用, 跳过 scan/open) */
     override external fun nativeConnectUsbFd(handle: Long, fd: Int, serial: String): Int
+    /** 通过 Wi-Fi 直连相机 PTP/IP 服务 (ip + 端口 15740)。JNI 已实现但此前从未声明, 导致 Wi-Fi 无法连接 */
+    override external fun nativeConnectWifi(handle: Long, ip: String, port: Int): Int
     override external fun nativeDisconnect(handle: Long)
     /** @return ConnectionStatus 枚举序数 */
     override external fun nativeGetStatus(handle: Long): Int
@@ -41,6 +43,8 @@ object CameraBridge : CameraApi {
     // ─── 相机参数 ─────────────────────────────────────────────
     override external fun nativeSetProperty(handle: Long, propId: Int, value: Long): Int
     override external fun nativeGetProperty(handle: Long, propId: Int): Long
+    /** 批量读取属性: 一次 JNI 调用取多个, 供参数轮询减少跨边界开销 */
+    override external fun nativeGetProperties(handle: Long, propIds: IntArray): LongArray?
 
     // ─── 文件传输 ─────────────────────────────────────────────
     override external fun nativeStartTransfer(handle: Long, objectHandle: Long, destPath: String): Int
@@ -77,6 +81,17 @@ object CameraBridge : CameraApi {
 
     /** 注册传输进度回调(连接成功后调一次) */
     override external fun nativeRegisterProgressCallback(handle: Long, callback: TransferProgressCallback)
+
+    // ─── FTP 自动化 ─────────────────────────────────────────────
+    /** 配置 FTP 服务器 (不立即连接)。字段对应 C 层 FtpConfig */
+    override external fun nativeSetFtpConfig(
+        handle: Long, host: String, port: Int,
+        username: String, password: String, remotePath: String,
+        useTls: Boolean, autoUpload: Boolean,
+    ): Int
+
+    /** 将本地文件异步导出到 FTP (需先 nativeSetFtpConfig) */
+    override external fun nativeExportToFtp(handle: Long, localPath: String): Int
 
     // ─── 常量 (同 camera_api.h) ───────────────────────────────
     const val TRANSPORT_AUTO      = 0

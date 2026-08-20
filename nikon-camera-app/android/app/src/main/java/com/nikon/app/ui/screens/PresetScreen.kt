@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nikon.app.ui.theme.*
+import com.nikon.app.viewmodel.PictureControl
 
 /**
  * PresetScreen — 预设中心 / 色彩偏移
@@ -44,9 +45,9 @@ fun PresetScreen(
                     desc = "高饱和 · 锐利",
                     active = true,
                     expanded = true,
-                    hue = 0, saturation = 65, contrast = 40,
-                    clarity = 60, sharpening = 50, brightness = 0,
-                    wbA = 3, wbB = 0, wbG = 0, wbM = 2,
+                    hue = 0, saturation = 3, contrast = 2,
+                    clarity = 2, sharpening = 5, brightness = 0,
+                    wbAb = 3, wbGm = 0,
                 ),
                 PresetData(
                     id = "portrait_soft",
@@ -54,9 +55,9 @@ fun PresetScreen(
                     desc = "低对比 · 柔和肤色",
                     active = false,
                     expanded = false,
-                    hue = 0, saturation = 30, contrast = -15,
-                    clarity = -10, sharpening = 20, brightness = 5,
-                    wbA = 1, wbB = 0, wbG = 2, wbM = -1,
+                    hue = 0, saturation = 1, contrast = -1,
+                    clarity = -1, sharpening = 2, brightness = 1,
+                    wbAb = 1, wbGm = 2,
                 ),
                 PresetData(
                     id = "night_high_iso",
@@ -64,9 +65,9 @@ fun PresetScreen(
                     desc = "降噪优先 · 高锐度",
                     active = false,
                     expanded = false,
-                    hue = 0, saturation = 40, contrast = 25,
-                    clarity = 30, sharpening = 70, brightness = -10,
-                    wbA = 0, wbB = 2, wbG = -2, wbM = 0,
+                    hue = 0, saturation = 2, contrast = 1,
+                    clarity = 1, sharpening = 7, brightness = -1,
+                    wbAb = 0, wbGm = -2,
                 ),
             )
         )
@@ -160,23 +161,13 @@ fun PresetScreen(
                         }
                     },
                     onApply = {
-                        // 应用到相机:先本地激活,再通过 setProperty 下发 Picture Control 参数
+                        // 应用到相机: 先本地激活, 再通过 nativeSetPictCtrl 下发真实 Picture Control (PTP 0x90CD)
                         val newList = presets.toMutableList()
                         newList.forEachIndexed { i, p ->
                             newList[i] = p.copy(active = i == index)
                         }
                         presets = newList
-                        // PTP Picture Control 属性码占位(实际码以 SPEC_PROTOCOL 为准)
-                        // 0x5020~0x5026: hue/saturation/contrast/clarity/sharpening/brightness
-                        viewModel.setProperty(0x5020, preset.hue.toLong())
-                        viewModel.setProperty(0x5021, preset.saturation.toLong())
-                        viewModel.setProperty(0x5022, preset.contrast.toLong())
-                        viewModel.setProperty(0x5023, preset.clarity.toLong())
-                        viewModel.setProperty(0x5024, preset.sharpening.toLong())
-                        viewModel.setProperty(0x5025, preset.brightness.toLong())
-                        // WB 色偏 0x5030/0x5031
-                        viewModel.setProperty(0x5030, preset.wbA.toLong())
-                        viewModel.setProperty(0x5031, preset.wbG.toLong())
+                        viewModel.applyPictureControl(preset.toPictureControl())
                     },
                 )
             }
@@ -188,6 +179,11 @@ fun PresetScreen(
 
 // ─── 预设数据类 ─────────────────────────────────────────────
 
+/**
+ * 预设数据 — 取值范围与 C 层 `struct PictureControl` 对齐 (PTP 0x90CC/0x90CD):
+ *   hue -3..3, saturation -3..3, contrast -3..3, clarity -3..3,
+ *   sharpening 0..9, brightness -1..1, wbAb/wbGm -6..6, colorSpace 0..1
+ */
 data class PresetData(
     val id: String,
     val name: String,
@@ -200,11 +196,23 @@ data class PresetData(
     val clarity: Int = 0,
     val sharpening: Int = 0,
     val brightness: Int = 0,
-    val wbA: Int = 0,
-    val wbB: Int = 0,
-    val wbG: Int = 0,
-    val wbM: Int = 0,
-)
+    val wbAb: Int = 0,
+    val wbGm: Int = 0,
+    val colorSpace: Int = 0,
+) {
+    /** 编码为 CameraAPI 的 PictureControl 结构。 */
+    fun toPictureControl(): PictureControl = PictureControl(
+        hue = hue,
+        saturation = saturation,
+        contrast = contrast,
+        clarity = clarity,
+        sharpening = sharpening,
+        brightness = brightness,
+        wbAb = wbAb,
+        wbGm = wbGm,
+        colorSpace = colorSpace,
+    )
+}
 
 // ─── 预设卡片 (手风琴模式) ─────────────────────────────────
 
@@ -306,22 +314,22 @@ private fun PresetCard(
                     // Picture Control 参数
                     SectionLabel("Picture Control")
 
-                    ParamSlider("色相", preset.hue, -6, 6) {
+                    ParamSlider("色相", preset.hue, -3, 3) {
                         onUpdate(preset.copy(hue = it))
                     }
-                    ParamSlider("饱和度", preset.saturation, -100, 100) {
+                    ParamSlider("饱和度", preset.saturation, -3, 3) {
                         onUpdate(preset.copy(saturation = it))
                     }
-                    ParamSlider("对比度", preset.contrast, -100, 100) {
+                    ParamSlider("对比度", preset.contrast, -3, 3) {
                         onUpdate(preset.copy(contrast = it))
                     }
-                    ParamSlider("清晰度", preset.clarity, -100, 100) {
+                    ParamSlider("清晰度", preset.clarity, -3, 3) {
                         onUpdate(preset.copy(clarity = it))
                     }
-                    ParamSlider("锐化", preset.sharpening, -100, 100) {
+                    ParamSlider("锐化", preset.sharpening, 0, 9) {
                         onUpdate(preset.copy(sharpening = it))
                     }
-                    ParamSlider("亮度", preset.brightness, -100, 100) {
+                    ParamSlider("亮度", preset.brightness, -1, 1) {
                         onUpdate(preset.copy(brightness = it))
                     }
 
@@ -336,11 +344,11 @@ private fun PresetCard(
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
 
-                    ParamSlider("A ←→ B", preset.wbA - preset.wbB, -20, 20) {
-                        onUpdate(preset.copy(wbA = it, wbB = -it))
+                    ParamSlider("A ←→ B", preset.wbAb, -6, 6) {
+                        onUpdate(preset.copy(wbAb = it))
                     }
-                    ParamSlider("G ←→ M", preset.wbG - preset.wbM, -20, 20) {
-                        onUpdate(preset.copy(wbG = it, wbM = -it))
+                    ParamSlider("G ←→ M", preset.wbGm, -6, 6) {
+                        onUpdate(preset.copy(wbGm = it))
                     }
 
                     Spacer(Modifier.height(16.dp))

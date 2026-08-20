@@ -33,6 +33,8 @@ interface CameraApi {
     fun nativeConnect(handle: Long, cameraId: String): Int
     /** 使用已获取权限的 USB fd 连接 (Android 专用, 跳过 scan/open) */
     fun nativeConnectUsbFd(handle: Long, fd: Int, serial: String): Int
+    /** 通过 Wi-Fi 直连相机 PTP/IP 服务 (ip + 端口 15740) */
+    fun nativeConnectWifi(handle: Long, ip: String, port: Int): Int
     fun nativeDisconnect(handle: Long)
     /** @return ConnectionStatus 枚举序数 */
     fun nativeGetStatus(handle: Long): Int
@@ -42,6 +44,8 @@ interface CameraApi {
 
     fun nativeSetProperty(handle: Long, propId: Int, value: Long): Int
     fun nativeGetProperty(handle: Long, propId: Int): Long
+    /** 批量读取属性,返回与 propIds 等长的值数组; handle 无效返回 null */
+    fun nativeGetProperties(handle: Long, propIds: IntArray): LongArray?
 
     fun nativeStartTransfer(handle: Long, objectHandle: Long, destPath: String): Int
     fun nativeCancelTransfer(handle: Long, jobId: Int): Int
@@ -70,4 +74,14 @@ interface CameraApi {
 
     /** 注册传输进度回调(连接成功后调一次) */
     fun nativeRegisterProgressCallback(handle: Long, callback: TransferProgressCallback)
+
+    /** 配置 FTP 服务器 (不立即连接)。字段对应 C 层 FtpConfig */
+    fun nativeSetFtpConfig(
+        handle: Long, host: String, port: Int,
+        username: String, password: String, remotePath: String,
+        useTls: Boolean, autoUpload: Boolean,
+    ): Int
+
+    /** 将本地文件异步导出到 FTP (需先 nativeSetFtpConfig) */
+    fun nativeExportToFtp(handle: Long, localPath: String): Int
 }

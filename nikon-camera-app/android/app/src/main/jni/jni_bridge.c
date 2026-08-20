@@ -18,6 +18,19 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
+/* ─── 敏感数据安全清零 ───
+ * 目标: 凭证清零后编译器不得因"结果未被使用"而把清零优化掉。
+ * Android NDK (bionic) 不导出 glibc 的 explicit_bzero, 故用 memset +
+ * 内联汇编内存屏障保证清除动作一定保留, 跨 clang/NDK 版本可靠。 */
+static void nikon_bzero(void *dst, size_t len) {
+    if (!dst || !len) return;
+    memset(dst, 0, len);
+    /* 编译屏障: 告诉编译器 dst 内存发生了"可能被外部观察"的写入,
+     * 防止后续把 memset 当作死代码消除。 */
+    __asm__ __volatile__("" : : "r"(dst) : "memory");
+}
+#define NIKON_BZERO(dst, len) nikon_bzero((dst), (len))
+
 /* ─── JavaVM 引用(进度回调需要 AttachCurrentThread)── */
 static JavaVM *g_jvm = NULL;
 
@@ -29,26 +42,68 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
 
 /* ─── 传输进度回调桥接 ─── */
 static jobject g_progress_callback = NULL;
+/* 缓存回调对象的类引用与方法 id, 避免每次进度回调重复 GetObjectClass/GetMethodID */
+static jclass    g_progress_cls = NULL;
+static jmethodID g_progress_mid = NULL;
+/* 保护上述全局引用: 进度回调运行在 native 传输线程池, 而注册/销毁在主线程,
+ * 若不加以保护, 回调线程可能读到主线程已 DeleteGlobalRef 释放的 method id 或
+ * callback 引用, 导致 JNI 崩溃(use-after-free)。 */
+static pthread_mutex_t g_progress_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* ─── JNI 线程附着缓存 ───
+ * 进度回调来自 native 传输线程池, 高频触发。旧实现每次回调都
+ * AttachCurrentThread + DetachCurrentThread, 开销大且 Detach 会清理
+ * 线程局部状态。改为: 每个线程只 attach 一次, 通过 pthread_key 析构
+ * 函数在线程退出时自动 detach。 */
+static pthread_key_t  g_jni_tls_key;
+static pthread_once_t g_jni_tls_once = PTHREAD_ONCE_INIT;
+
+static void _jni_tls_destructor(void *value) {
+    if (value && g_jvm) {
+        (*g_jvm)->DetachCurrentThread(g_jvm);
+    }
+}
+
+static void _jni_tls_key_init(void) {
+    pthread_key_create(&g_jni_tls_key, _jni_tls_destructor);
+}
+
+/** 获取当前线程的 JNIEnv: 已附着则直接返回, 否则附着并注册退出时自动 detach */
+static JNIEnv *_get_thread_jni_env(void) {
+    JNIEnv *env = NULL;
+    if (!g_jvm) return NULL;
+    if ((*g_jvm)->GetEnv(g_jvm, (void **)&env, JNI_VERSION_1_6) == JNI_OK && env) {
+        return env;
+    }
+    if ((*g_jvm)->AttachCurrentThread(g_jvm, (void **)&env, NULL) != JNI_OK || !env) {
+        return NULL;
+    }
+    pthread_once(&g_jni_tls_once, _jni_tls_key_init);
+    pthread_setspecific(g_jni_tls_key, (void *)1);
+    return env;
+}
 
 static void s_transfer_progress_cb(int jobId, TransferProgress *p, void *user) {
     (void)user;
-    if (!g_jvm || !g_progress_callback || !p) return;
+    if (!g_jvm || !p) return;
 
-    JNIEnv *env = NULL;
-    jint rc = (*g_jvm)->AttachCurrentThread(g_jvm, (void **)&env, NULL);
-    if (rc != JNI_OK || !env) return;
+    /* 加锁取局部副本, 释放后再调用, 避免持锁跨 JNI 调用 */
+    jobject    cb  = NULL;
+    jmethodID mid = NULL;
+    pthread_mutex_lock(&g_progress_mutex);
+    cb  = g_progress_callback;
+    mid = g_progress_mid;
+    pthread_mutex_unlock(&g_progress_mutex);
+    if (!cb || !mid) return;
 
-    jclass cls = (*env)->GetObjectClass(env, g_progress_callback);
-    jmethodID mid = (*env)->GetMethodID(env, cls, "onProgress", "(IIDI)V");
-    if (mid) {
-        (*env)->CallVoidMethod(env, g_progress_callback, mid,
-            (jint)jobId,
-            (jdouble)p->speed_mbps,
-            (jint)p->percent,
-            (jint)p->status);
-    }
-    (*env)->DeleteLocalRef(env, cls);
-    (*g_jvm)->DetachCurrentThread(g_jvm);
+    JNIEnv *env = _get_thread_jni_env();
+    if (!env) return;
+
+    (*env)->CallVoidMethod(env, cb, mid,
+        (jint)jobId,
+        (jdouble)p->speed_mbps,
+        (jint)p->percent,
+        (jint)p->status);
 }
 
 /* ─── 全局 API 实例 ──────────────────────────────────────────── */
@@ -69,7 +124,19 @@ Java_com_nikon_app_jni_CameraBridge_nativeCreate(JNIEnv *env, jclass cls,
 JNIEXPORT void JNICALL
 Java_com_nikon_app_jni_CameraBridge_nativeDestroy(JNIEnv *env, jclass cls,
                                                    jlong handle) {
-    (void)env; (void)cls;
+    (void)cls;
+    /* 释放进度回调的全局引用,避免泄漏。加锁: 避免与传输线程的回调并发读写。 */
+    pthread_mutex_lock(&g_progress_mutex);
+    if (g_progress_callback) {
+        (*env)->DeleteGlobalRef(env, g_progress_callback);
+        g_progress_callback = NULL;
+    }
+    if (g_progress_cls) {
+        (*env)->DeleteGlobalRef(env, g_progress_cls);
+        g_progress_cls = NULL;
+        g_progress_mid = NULL;
+    }
+    pthread_mutex_unlock(&g_progress_mutex);
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
     if (api) {
         camera_api_destroy(api);
@@ -117,6 +184,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeConnect(JNIEnv *env, jclass cls,
                                                    jstring camera_id) {
     (void)cls;
     CameraAPI  *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     const char *id  = (*env)->GetStringUTFChars(env, camera_id, NULL);
     int rc = camera_api_connect(api, id);
     (*env)->ReleaseStringUTFChars(env, camera_id, id);
@@ -131,12 +199,14 @@ Java_com_nikon_app_jni_CameraBridge_nativeConnectUsbFd(JNIEnv *env, jclass cls,
                                                         jstring serial) {
     (void)cls;
     CameraAPI  *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     const char *s   = serial ? (*env)->GetStringUTFChars(env, serial, NULL) : NULL;
     int rc = camera_api_connect_usb_fd(api, (int)fd, s,
                                         PTP_USB_EP_OUT_DEFAULT,
                                         PTP_USB_EP_IN_DEFAULT);
-    if (s) (*env)->ReleaseStringUTFChars(env, serial, s);
+    /* 日志必须在 ReleaseStringUTFChars 之前打印,否则引用已释放的指针 (use-after-free) */
     LOGD("nativeConnectUsbFd fd=%d serial=%s rc=%d", fd, s ? s : "null", rc);
+    if (s) (*env)->ReleaseStringUTFChars(env, serial, s);
     return rc;
 }
 
@@ -144,14 +214,18 @@ JNIEXPORT void JNICALL
 Java_com_nikon_app_jni_CameraBridge_nativeDisconnect(JNIEnv *env, jclass cls,
                                                       jlong handle) {
     (void)env; (void)cls;
-    camera_api_disconnect((CameraAPI *)(uintptr_t)handle);
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return;
+    camera_api_disconnect(api);
 }
 
 JNIEXPORT jint JNICALL
 Java_com_nikon_app_jni_CameraBridge_nativeGetStatus(JNIEnv *env, jclass cls,
                                                      jlong handle) {
     (void)env; (void)cls;
-    return (jint)camera_api_get_status((CameraAPI *)(uintptr_t)handle);
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return 0;  /* STATUS_DISCONNECTED */
+    return (jint)camera_api_get_status(api);
 }
 
 /* ─── 拍摄控制 ───────────────────────────────────────────────── */
@@ -160,7 +234,9 @@ JNIEXPORT jint JNICALL
 Java_com_nikon_app_jni_CameraBridge_nativeCapture(JNIEnv *env, jclass cls,
                                                    jlong handle) {
     (void)env; (void)cls;
-    return camera_api_capture((CameraAPI *)(uintptr_t)handle);
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
+    return camera_api_capture(api);
 }
 
 JNIEXPORT jint JNICALL
@@ -169,8 +245,9 @@ Java_com_nikon_app_jni_CameraBridge_nativeCaptureBurst(JNIEnv *env, jclass cls,
                                                         jint count,
                                                         jint interval_ms) {
     (void)env; (void)cls;
-    return camera_api_capture_burst((CameraAPI *)(uintptr_t)handle,
-                                    (int)count, (int)interval_ms);
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
+    return camera_api_capture_burst(api, (int)count, (int)interval_ms);
 }
 
 /* ─── 相机参数 ───────────────────────────────────────────────── */
@@ -181,8 +258,9 @@ Java_com_nikon_app_jni_CameraBridge_nativeSetProperty(JNIEnv *env, jclass cls,
                                                        jint prop_id,
                                                        jlong value) {
     (void)env; (void)cls;
-    return camera_api_set_property((CameraAPI *)(uintptr_t)handle,
-                                   (uint16_t)prop_id, (uint32_t)value);
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
+    return camera_api_set_property(api, (uint16_t)prop_id, (uint32_t)value);
 }
 
 JNIEXPORT jlong JNICALL
@@ -190,10 +268,53 @@ Java_com_nikon_app_jni_CameraBridge_nativeGetProperty(JNIEnv *env, jclass cls,
                                                        jlong handle,
                                                        jint prop_id) {
     (void)env; (void)cls;
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return 0;
     uint32_t val = 0;
-    camera_api_get_property((CameraAPI *)(uintptr_t)handle,
-                            (uint16_t)prop_id, &val);
+    camera_api_get_property(api, (uint16_t)prop_id, &val);
     return (jlong)val;
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_nikon_app_jni_CameraBridge_nativeGetProperties(JNIEnv *env, jclass cls,
+                                                         jlong handle,
+                                                         jintArray prop_ids) {
+    (void)cls;
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api || !prop_ids) return NULL;
+
+    jsize count = (*env)->GetArrayLength(env, prop_ids);
+    if (count <= 0) return NULL;
+
+    jint     *ids = (*env)->GetIntArrayElements(env, prop_ids, NULL);
+    if (!ids) return NULL;
+
+    uint16_t *cids = (uint16_t *)malloc(sizeof(uint16_t) * (size_t)count);
+    uint32_t *vals = (uint32_t *)calloc((size_t)count, sizeof(uint32_t));
+    if (!cids || !vals) {
+        free(cids); free(vals);
+        (*env)->ReleaseIntArrayElements(env, prop_ids, ids, JNI_ABORT);
+        return NULL;
+    }
+    for (jsize i = 0; i < count; i++) cids[i] = (uint16_t)ids[i];
+    (*env)->ReleaseIntArrayElements(env, prop_ids, ids, JNI_ABORT);
+
+    camera_api_get_properties(api, cids, vals, (int)count);
+
+    jlongArray result = (*env)->NewLongArray(env, count);
+    if (result) {
+        jlong tmp[64];
+        /* 栈缓冲足够覆盖实际用法(轮询 ≤10 个属性); 超出时走堆 */
+        jlong *out = (count <= 64) ? tmp : (jlong *)malloc(sizeof(jlong) * (size_t)count);
+        if (out) {
+            for (jsize i = 0; i < count; i++) out[i] = (jlong)vals[i];
+            (*env)->SetLongArrayRegion(env, result, 0, count, out);
+            if (out != tmp) free(out);
+        }
+    }
+    free(cids);
+    free(vals);
+    return result;
 }
 
 /* ─── 文件传输 ───────────────────────────────────────────────── */
@@ -205,6 +326,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeStartTransfer(JNIEnv *env, jclass cls,
                                                          jstring dest_path) {
     (void)cls;
     CameraAPI  *api  = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     const char *path = (*env)->GetStringUTFChars(env, dest_path, NULL);
     int job = camera_api_start_transfer(api, (uint32_t)object_handle, path);
     (*env)->ReleaseStringUTFChars(env, dest_path, path);
@@ -216,7 +338,9 @@ Java_com_nikon_app_jni_CameraBridge_nativeCancelTransfer(JNIEnv *env, jclass cls
                                                           jlong handle,
                                                           jint job_id) {
     (void)env; (void)cls;
-    return camera_api_cancel_transfer((CameraAPI *)(uintptr_t)handle, (int)job_id);
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
+    return camera_api_cancel_transfer(api, (int)job_id);
 }
 
 /* ─── Picture Control (预设 / 色彩偏移) ─────────────────────── */
@@ -226,6 +350,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeGetPictCtrl(JNIEnv *env, jclass cls,
                                                        jlong handle) {
     (void)cls;
     CameraAPI    *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return NULL;
     PictureControl pc;
     int rc = camera_api_get_pictctrl(api, &pc);
     if (rc != CAM_OK) return NULL;
@@ -242,6 +367,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeSetPictCtrl(JNIEnv *env, jclass cls,
                                                         jbyteArray data) {
     (void)cls;
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     PictureControl pc;
     (*env)->GetByteArrayRegion(env, data, 0, sizeof(PictureControl),
                                (jbyte *)&pc);
@@ -257,10 +383,12 @@ Java_com_nikon_app_jni_CameraBridge_nativeConnectWifi(JNIEnv *env, jclass cls,
                                                        jint port) {
     (void)cls;
     CameraAPI  *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     const char *ip  = (*env)->GetStringUTFChars(env, ip_addr, NULL);
     int rc = camera_api_connect_wifi(api, ip, (uint16_t)port);
-    (*env)->ReleaseStringUTFChars(env, ip_addr, ip);
+    /* 日志必须在 ReleaseStringUTFChars 之前打印,否则引用已释放的指针 (use-after-free) */
     LOGD("nativeConnectWifi ip=%s port=%d rc=%d", ip, port, rc);
+    (*env)->ReleaseStringUTFChars(env, ip_addr, ip);
     return rc;
 }
 
@@ -298,9 +426,10 @@ Java_com_nikon_app_jni_CameraBridge_nativeSendFile(JNIEnv *env, jclass cls,
                        ? (*env)->GetStringUTFChars(env, remote_name, NULL)
                        : NULL;
     int rc = camera_api_send_file(api, path, (uint32_t)storage_id, name);
+    /* 日志必须在 ReleaseStringUTFChars 之前打印,否则引用已释放的指针 (use-after-free) */
+    LOGD("nativeSendFile path=%s storage=%d rc=%d", path, storage_id, rc);
     (*env)->ReleaseStringUTFChars(env, local_path, path);
     if (name) (*env)->ReleaseStringUTFChars(env, remote_name, name);
-    LOGD("nativeSendFile path=%s storage=%d rc=%d", path, storage_id, rc);
     return rc;
 }
 
@@ -379,12 +508,16 @@ static pthread_mutex_t g_lv_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void _lv_frame_cb(const uint8_t *data, int size, void *user_data) {
     (void)user_data;
+    if (!data || size <= 0) return;
     pthread_mutex_lock(&g_lv_mutex);
     if (g_lv_frame) free(g_lv_frame);
-    g_lv_frame = (uint8_t *)malloc(size);
-    if (g_lv_frame) {
-        memcpy(g_lv_frame, data, size);
-        g_lv_size = size;
+    g_lv_frame = NULL;
+    g_lv_size  = 0;
+    uint8_t *tmp = (uint8_t *)malloc((size_t)size);
+    if (tmp) {
+        memcpy(tmp, data, (size_t)size);
+        g_lv_frame = tmp;
+        g_lv_size  = size;
     }
     pthread_mutex_unlock(&g_lv_mutex);
 }
@@ -394,6 +527,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeStartLiveView(JNIEnv *env, jclass cls,
                                                          jlong handle) {
     (void)env; (void)cls;
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     int rc = camera_api_start_liveview(api);
     LOGD("nativeStartLiveView rc=%d", rc);
     return rc;
@@ -404,6 +538,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeStopLiveView(JNIEnv *env, jclass cls,
                                                         jlong handle) {
     (void)env; (void)cls;
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     int rc = camera_api_stop_liveview(api);
     /* 清理帧缓冲 */
     pthread_mutex_lock(&g_lv_mutex);
@@ -424,16 +559,26 @@ Java_com_nikon_app_jni_CameraBridge_nativeGetLiveViewFrame(JNIEnv *env, jclass c
     int rc = camera_api_get_liveview_frame(api, _lv_frame_cb, NULL);
     if (rc != CAM_OK) return NULL;
 
+    /* 先加锁取出帧数据(拷到栈上持有的临时指针), 解锁后再做 JNI 分配。
+     * 不要在持锁时调用 NewByteArray: JNI 分配可能触发 GC/停顿, 与取帧线程
+     * 竞争同一把锁时极端情况下造成卡顿/死锁。 */
+    uint8_t *frame = NULL;
+    int      fsize = 0;
     pthread_mutex_lock(&g_lv_mutex);
-    jbyteArray arr = NULL;
     if (g_lv_frame && g_lv_size > 0) {
-        arr = (*env)->NewByteArray(env, g_lv_size);
-        (*env)->SetByteArrayRegion(env, arr, 0, g_lv_size, (jbyte *)g_lv_frame);
-        free(g_lv_frame);
+        frame = g_lv_frame;   /* 所有权转移给调用方, 置空避免重复 free */
+        fsize = g_lv_size;
         g_lv_frame = NULL;
         g_lv_size  = 0;
     }
     pthread_mutex_unlock(&g_lv_mutex);
+
+    if (!frame) return NULL;
+    jbyteArray arr = (*env)->NewByteArray(env, fsize);
+    if (arr) {
+        (*env)->SetByteArrayRegion(env, arr, 0, fsize, (jbyte *)frame);
+    }
+    free(frame);
     return arr;
 }
 
@@ -445,6 +590,7 @@ Java_com_nikon_app_jni_CameraBridge_nativeDeleteFile(JNIEnv *env, jclass cls,
                                                       jlong object_handle) {
     (void)env; (void)cls;
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
     return camera_api_delete_file(api, (uint32_t)object_handle);
 }
 
@@ -458,12 +604,87 @@ Java_com_nikon_app_jni_CameraBridge_nativeRegisterProgressCallback(JNIEnv *env, 
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
     if (!api || !callback) return;
 
-    /* 释放旧的回调引用 */
+    /* 释放旧的回调引用 (加锁, 避免与回调线程并发) */
+    pthread_mutex_lock(&g_progress_mutex);
     if (g_progress_callback) {
         (*env)->DeleteGlobalRef(env, g_progress_callback);
         g_progress_callback = NULL;
     }
+    if (g_progress_cls) {
+        (*env)->DeleteGlobalRef(env, g_progress_cls);
+        g_progress_cls = NULL;
+        g_progress_mid = NULL;
+    }
     g_progress_callback = (*env)->NewGlobalRef(env, callback);
+
+    /* 缓存类引用 + methodID, 回调路径不再每次查找 */
+    jclass cls_local = (*env)->GetObjectClass(env, callback);
+    if (cls_local) {
+        g_progress_mid = (*env)->GetMethodID(env, cls_local, "onProgress", "(IIDI)V");
+        g_progress_cls = (jclass)(*env)->NewGlobalRef(env, cls_local);
+        (*env)->DeleteLocalRef(env, cls_local);
+    }
+    pthread_mutex_unlock(&g_progress_mutex);
+
     camera_api_on_transfer_progress(api, s_transfer_progress_cb, NULL);
     LOGD("nativeRegisterProgressCallback registered");
+}
+
+/* ─── FTP 自动化 ──────────────────────────────────────────────── */
+
+JNIEXPORT jint JNICALL
+Java_com_nikon_app_jni_CameraBridge_nativeSetFtpConfig(JNIEnv *env, jclass cls,
+                                                       jlong handle,
+                                                       jstring host, jint port,
+                                                       jstring username, jstring password,
+                                                       jstring remote_path,
+                                                       jboolean use_tls, jboolean auto_upload) {
+    (void)cls;
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
+
+    FtpConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.port       = (uint16_t)port;
+    cfg.use_tls    = use_tls ? true : false;
+    cfg.auto_upload = auto_upload ? true : false;
+
+    const char *h = host        ? (*env)->GetStringUTFChars(env, host, NULL)        : NULL;
+    const char *u = username    ? (*env)->GetStringUTFChars(env, username, NULL)    : NULL;
+    const char *p = password    ? (*env)->GetStringUTFChars(env, password, NULL)    : NULL;
+    const char *r = remote_path ? (*env)->GetStringUTFChars(env, remote_path, NULL) : NULL;
+
+    if (h) snprintf(cfg.host,        sizeof(cfg.host),        "%s", h);
+    if (u) snprintf(cfg.username,    sizeof(cfg.username),    "%s", u);
+    if (p) snprintf(cfg.password,    sizeof(cfg.password),    "%s", p);
+    if (r) snprintf(cfg.remote_path, sizeof(cfg.remote_path), "%s", r);
+
+    if (h) (*env)->ReleaseStringUTFChars(env, host, h);
+    if (u) (*env)->ReleaseStringUTFChars(env, username, u);
+    if (p) (*env)->ReleaseStringUTFChars(env, password, p);
+    if (r) (*env)->ReleaseStringUTFChars(env, remote_path, r);
+
+    int rc = camera_api_set_ftp_config(api, &cfg);
+    /* 密码已拷贝进 cfg 并被 camera_api 消费, 使用后清零栈上敏感数据,
+     * 避免凭证残留在栈内存中。 */
+    NIKON_BZERO(cfg.password, sizeof(cfg.password));
+    NIKON_BZERO(cfg.username, sizeof(cfg.username));
+    LOGD("nativeSetFtpConfig host=%s port=%d rc=%d",
+         cfg.host, (int)cfg.port, rc);
+    return rc;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_nikon_app_jni_CameraBridge_nativeExportToFtp(JNIEnv *env, jclass cls,
+                                                      jlong handle, jstring local_path) {
+    (void)cls;
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api) return CAM_ERR_INVALID_PARAM;
+
+    const char *path = (*env)->GetStringUTFChars(env, local_path, NULL);
+    int rc = camera_api_export_to_ftp(api, path);
+    /* 日志必须在 ReleaseStringUTFChars 之前打印,否则引用已释放的指针 (use-after-free) */
+    LOGD("nativeExportToFtp path=%s rc=%d", path, rc);
+    (*env)->ReleaseStringUTFChars(env, local_path, path);
+    return rc;
 }

@@ -2,26 +2,32 @@
 <!--
     USB 设备过滤器 — 尼康相机
     Vendor ID: 0x04B0 (Nikon)
-    Product ID 列表涵盖 Z/D 系列常⻅机型
+
+    设计决策: 保持 vendor-id 全匹配, 而非精确匹配单个机型 Product ID。
+    原因:
+      1. 尼康相机型号多且迭代快, 精确匹配一旦遗漏某机型, 该设备将完全无法
+         触发自动连接 (Android 在 ATTACH 时按此 filter 决定是否拉起本应用)。
+      2. 非相机的尼康 USB 设备(如读卡器/固件盘)即使弹出提示, 也会被
+         CameraService 的接口二次校验 (interface class=6/255) 拒绝连接,
+         不会造成错误操作 —— 真正的过滤在代码层完成。
+    如需收紧(减少弹窗干扰), 可将下方 product-id 条目取消注释并删除全匹配行,
+    或按需增补你实际在用的机型。
 -->
 <resources>
-    <!-- 尼康 Z 系列 -->
+    <!-- 尼康 Z 系列 (全匹配 vendor) -->
     <usb-device vendor-id="1200" />           <!-- 0x04B0: 全匹配 -->
 
-    <!-- 
-        如需要精确匹配特定机型，可添加下列条目:
-        <usb-device vendor-id="1200" product-id="xxxx" />
-        常见 Z 系 Product ID:
-          0x0456 — Z9
-          0x0442 — Z8
-          0x0453 — Z7 II
-          0x0452 — Z6 III
-          0x044E — Z5
-          0x043C — Z50
-          0x043D — Zfc
-          0x0461 — Z30
-          0x045B — Zf
-          0x0428 — D780 (MTP)
-          0x0430 — D850 (MTP)
+    <!--
+        如需精确匹配特定机型, 取消下方注释并删除上面全匹配行:
+        以下 product-id 均为十进制写法, 按常见机型换算, 请以实际设备为准:
+        <usb-device vendor-id="1200" product-id="1110" />   (0x0456 Z9)
+        <usb-device vendor-id="1200" product-id="1090" />   (0x0442 Z8)
+        <usb-device vendor-id="1200" product-id="1107" />   (0x0453 Z7 II)
+        <usb-device vendor-id="1200" product-id="1106" />   (0x0452 Z6 III)
+        <usb-device vendor-id="1200" product-id="1102" />   (0x044E Z5)
+        <usb-device vendor-id="1200" product-id="1084" />   (0x043C Z50)
+        <usb-device vendor-id="1200" product-id="1085" />   (0x043D Zfc)
+        <usb-device vendor-id="1200" product-id="1121" />   (0x0461 Z30)
+        <usb-device vendor-id="1200" product-id="1115" />   (0x045B Zf)
     -->
 </resources>

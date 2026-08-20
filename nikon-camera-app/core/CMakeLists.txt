@@ -13,6 +13,7 @@ set(CORE_SOURCES
     adapter/wifi_adapter.c
     transfer/zerocopy.c
     transfer/chunked.c
+    transfer/ftp_client.c
     event/watcher.c
     hal/wifi/wifi_pw_obfuscate.c
 )

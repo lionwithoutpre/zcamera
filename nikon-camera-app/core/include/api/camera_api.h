@@ -249,6 +249,17 @@ int camera_api_set_property(CameraAPI *api, uint16_t prop_id, uint32_t value);
 /** 读取设备属性 (PTP GetDevicePropValue)。 */
 int camera_api_get_property(CameraAPI *api, uint16_t prop_id, uint32_t *value);
 
+/**
+ * 批量读取设备属性 (一次调用取多个, 减少上层跨语言边界次数,
+ * 并让调用方拿到一组近似同一时刻的参数快照)。
+ * @param prop_ids  属性码数组, 长度 count
+ * @param values    出参数组, 长度 count; 单项失败时保留调用前的原值
+ * @param count     属性个数 (<=0 或指针为空返回 CAM_ERR_INVALID_PARAM)
+ * @return 失败项个数, 0 表示全部成功
+ */
+int camera_api_get_properties(CameraAPI *api, const uint16_t *prop_ids,
+                              uint32_t *values, int count);
+
 /* 便捷内联方法 */
 static inline int camera_api_set_iso(CameraAPI *api, int iso) {
     return camera_api_set_property(api, 0xD010, (uint32_t)iso);

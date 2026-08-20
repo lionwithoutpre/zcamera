@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -179,6 +181,7 @@ fun GalleryScreen(
                     selected = if (id in selected) selected - id else selected + id
                 },
                 onOpenDetail = { detailId = it },
+                viewModel = viewModel,
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -202,6 +205,7 @@ fun GalleryScreen(
                         viewModel.startTransferToApp(file.objectHandle, file.name)
                     },
                     onClose = { detailId = null },
+                    viewModel = viewModel,
                 )
             }
         }
@@ -428,6 +432,7 @@ private fun GridContent(
     selected: Set<Long>,
     onToggle: (Long) -> Unit,
     onOpenDetail: (Long) -> Unit,
+    viewModel: CameraViewModel,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier = modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
@@ -457,6 +462,7 @@ private fun GridContent(
                                     selected = f.id in selected,
                                     onToggle = { onToggle(f.id) },
                                     onOpen = { onOpenDetail(f.id) },
+                                    viewModel = viewModel,
                                     modifier = Modifier.weight(1f),
                                 )
                             } else {
@@ -470,35 +476,86 @@ private fun GridContent(
     }
 }
 
+/**
+ * 相机缩略图: 通过 nativeGetThumbnail 拉取 JPEG 并解码渲染。
+ * 内存管理: produceState + awaitDispose 回收旧 Bitmap, 避免 LazyColumn 滚动时的泄漏/竞态。
+ * 性能: produceState 块默认在组合(主)线程, 解码切到 Default 调度器避免滚动掉帧。
+ * 无缩略图 (RAW 缺缩略图 / 未连接 / 解码失败) 时回退到渐变占位。
+ */
+@Composable
+private fun RemoteThumbnail(
+    objectHandle: Long,
+    format: String,
+    viewModel: CameraViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val bitmapState by produceState<android.graphics.Bitmap?>(initialValue = null, objectHandle) {
+        val bytes = viewModel.getThumbnail(objectHandle)
+        val bmp = bytes?.let {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)
+            }
+        }
+        value = bmp
+        awaitDispose {
+            bmp?.let { if (!it.isRecycled) it.recycle() }
+        }
+    }
+
+    val bmp = bitmapState
+    if (bmp != null && !bmp.isRecycled) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = "缩略图",
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+        )
+    } else {
+        Box(
+            modifier = modifier.background(
+                Brush.linearGradient(
+                    listOf(
+                        if (format == "NEF") Color(0xFF1A3A5C) else Color(0xFF2A1A0D),
+                        if (format == "NEF") Color(0xFF0D1F33) else Color(0xFF1A1500),
+                    )
+                )
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Image, null,
+                tint = Color.White.copy(alpha = 0.15f),
+                modifier = Modifier.size(28.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun ThumbCell(
     file: GalFile,
     selected: Boolean,
     onToggle: () -> Unit,
     onOpen: () -> Unit,
+    viewModel: CameraViewModel,
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(6.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        if (file.format == "NEF") Color(0xFF1A3A5C) else Color(0xFF2A1A0D),
-                        if (file.format == "NEF") Color(0xFF0D1F33) else Color(0xFF1A1500),
-                    )
-                )
-            )
             .combinedClickable(
-            onClick = onToggle,
-            onLongClick = onOpen,
+            // 常见相册交互: 单击打开详情, 长按多选
+            onClick = onOpen,
+            onLongClick = onToggle,
         ),
     ) {
-        Icon(
-            Icons.Filled.Image, null,
-            tint = Color.White.copy(alpha = 0.15f),
-            modifier = Modifier.size(28.dp).align(Alignment.Center),
+        // 真实缩略图: 加载成功后覆盖占位渐变; 无缩略图时回退渐变 + 图标
+        RemoteThumbnail(
+            objectHandle = file.objectHandle,
+            format = file.format,
+            viewModel = viewModel,
+            modifier = Modifier.fillMaxSize(),
         )
         // 格式标签
         Text(
@@ -583,8 +640,9 @@ private fun GalleryListRow(
         shape = RoundedCornerShape(12.dp),
         border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, NikonYellow) else null,
         modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = onToggle,
-            onLongClick = onOpen,
+            // 常见相册交互: 单击打开详情, 长按多选
+            onClick = onOpen,
+            onLongClick = onToggle,
         ),
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -626,6 +684,7 @@ private fun FileDetailCard(
     file: GalFile,
     onTransfer: () -> Unit,
     onClose: () -> Unit,
+    viewModel: CameraViewModel,
 ) {
     Surface(
         color = NikonSurface2,
@@ -645,17 +704,18 @@ private fun FileDetailCard(
                 Spacer(Modifier.weight(1f))
                 Icon(Icons.Filled.Close, "关闭", tint = NikonText3, modifier = Modifier.size(14.dp).clickable(onClick = onClose))
             }
-            // 预览大图
+            // 预览大图 (真实缩略图, 无则回退渐变占位)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp)
-                    .background(
-                        Brush.linearGradient(listOf(Color(0xFF1A3A5C), Color(0xFF0D1F33)))
-                    ),
-                contentAlignment = Alignment.Center,
+                    .height(120.dp),
             ) {
-                Icon(Icons.Filled.Image, null, tint = Color.White.copy(alpha = 0.12f), modifier = Modifier.size(48.dp))
+                RemoteThumbnail(
+                    objectHandle = file.objectHandle,
+                    format = file.format,
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 // RAW badge
                 Text(
                     file.format,

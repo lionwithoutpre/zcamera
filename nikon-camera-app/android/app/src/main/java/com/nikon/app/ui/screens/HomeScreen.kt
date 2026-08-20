@@ -1,6 +1,13 @@
 package com.nikon.app.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BurstMode
@@ -32,9 +40,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nikon.app.ble.BleManager
 import com.nikon.app.jni.CameraBridge
 import com.nikon.app.ui.components.StatusCapsule
 import com.nikon.app.ui.theme.*
@@ -58,10 +68,40 @@ fun HomeScreen(
     val cameras by viewModel.cameras.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val serviceReady by viewModel.serviceReady.collectAsStateWithLifecycle()
+    val bleDevices by viewModel.bleDevices.collectAsStateWithLifecycle()
+    val bleScanning by viewModel.bleScanning.collectAsStateWithLifecycle()
     val selectedCamera = cameras.firstOrNull()
 
     // 连接方式选择提升到 HomeScreen 层级,避免 SCANNING↔DISCONNECTED 切换时重置
     var transport by remember { mutableStateOf(0) } // 0=USB 1=Wi-Fi 2=BLE
+
+    // BLE 运行时权限 (Android 12+: SCAN/CONNECT; 11-: FINE_LOCATION)
+    val context = LocalContext.current
+    val blePermissions = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* 授权结果不阻塞; 用户可再次点击扫描 */ }
+
+    fun hasBlePermission(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+
+    val onBleScan: () -> Unit = {
+        if (hasBlePermission()) viewModel.startBleScan()
+        else blePermissionLauncher.launch(blePermissions)
+    }
+    val onBleConnect: (String) -> Unit = { address -> viewModel.connectBleWake(address) }
+    val onWifiConnect: (String, Int) -> Unit = { ip, port -> viewModel.connectWifi(ip, port) }
 
     Column(
         modifier = Modifier
@@ -87,6 +127,11 @@ fun HomeScreen(
                     onScan = { viewModel.scan() },
                     onConnect = { viewModel.connect(it) },
                     onDismissError = { viewModel.clearError() },
+                    bleDevices = bleDevices,
+                    bleScanning = bleScanning,
+                    onBleScan = onBleScan,
+                    onBleConnect = onBleConnect,
+                    onWifiConnect = onWifiConnect,
                 )
             }
             CameraBridge.STATUS_SCANNING -> {
@@ -100,6 +145,11 @@ fun HomeScreen(
                     onScan = {},
                     onConnect = { viewModel.connect(it) },
                     onDismissError = {},
+                    bleDevices = bleDevices,
+                    bleScanning = bleScanning,
+                    onBleScan = onBleScan,
+                    onBleConnect = onBleConnect,
+                    onWifiConnect = onWifiConnect,
                 )
             }
             CameraBridge.STATUS_CONNECTING -> {
@@ -141,6 +191,11 @@ fun HomeScreen(
                     onScan = { viewModel.scan() },
                     onConnect = { viewModel.connect(it) },
                     onDismissError = { viewModel.clearError() },
+                    bleDevices = bleDevices,
+                    bleScanning = bleScanning,
+                    onBleScan = onBleScan,
+                    onBleConnect = onBleConnect,
+                    onWifiConnect = onWifiConnect,
                 )
             }
         }
@@ -203,7 +258,19 @@ private fun ScanContent(
     onScan: () -> Unit,
     onConnect: (String) -> Unit,
     onDismissError: () -> Unit,
+    bleDevices: List<BleManager.Device> = emptyList(),
+    bleScanning: Boolean = false,
+    onBleScan: () -> Unit = {},
+    onBleConnect: (String) -> Unit = {},
+    onWifiConnect: (String, Int) -> Unit = { _, _ -> },
 ) {
+    val isBle = transport == 2
+    val isWifi = transport == 1
+    val effectiveScanning = if (isBle) bleScanning else isScanning
+
+    // Wi-Fi 直连输入 (尼康热点默认 192.168.1.1:15740)
+    var wifiIp by remember { mutableStateOf("192.168.1.1") }
+    var wifiPortText by remember { mutableStateOf("15740") }
 
     Column(
         modifier = Modifier
@@ -215,29 +282,34 @@ private fun ScanContent(
         Spacer(Modifier.height(40.dp))
 
         // ✅ 错误横幅(失败时)
-        if (error != null && !isScanning) {
+        if (error != null && !effectiveScanning) {
             ErrorBanner(
                 title = "连接失败",
                 desc = "无法建立 USB PTP 会话",
                 code = error,
-                onRetry = { onScan() },
+                onRetry = { if (isBle) onBleScan() else onScan() },
                 onClose = onDismissError,
             )
             Spacer(Modifier.height(20.dp))
         }
 
         // 扫描动画圈
-        ScanPulse(isScanning = isScanning)
+        ScanPulse(isScanning = effectiveScanning)
 
         Spacer(Modifier.height(24.dp))
 
-        if (isScanning) {
+        if (effectiveScanning) {
             Text("正在扫描…", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NikonText)
             Spacer(Modifier.height(8.dp))
-            Text("检测 USB / Wi-Fi / 蓝牙 尼康相机设备", fontSize = 12.sp, color = NikonText2)
+            Text(
+                if (isBle) "检测蓝牙尼康相机设备"
+                else "检测 USB / Wi-Fi / 蓝牙 尼康相机设备",
+                fontSize = 12.sp, color = NikonText2,
+            )
         } else if (error == null) {
             Text(
                 when {
+                    isBle -> if (bleDevices.isEmpty()) "未发现蓝牙尼康设备" else "发现的蓝牙设备"
                     !serviceReady -> "服务初始化中…"
                     cameras.isEmpty() -> "未发现尼康设备"
                     else -> "发现的设备"
@@ -245,7 +317,14 @@ private fun ScanContent(
                 fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NikonText,
             )
             Spacer(Modifier.height(6.dp))
-            if (cameras.isEmpty()) {
+            if (isBle) {
+                if (bleDevices.isEmpty()) {
+                    Text(
+                        "请确保相机已开启蓝牙并处于可发现状态",
+                        fontSize = 12.sp, color = NikonText2,
+                    )
+                }
+            } else if (cameras.isEmpty()) {
                 Text(
                     if (!serviceReady) "正在启动相机服务,请稍候…"
                     else "请连接相机后选择连接方式",
@@ -321,10 +400,58 @@ private fun ScanContent(
 
         Spacer(Modifier.height(28.dp))
 
-        // 扫描按钮(服务未就绪时禁用)
+        // ✅ Wi-Fi 直连输入 (手机需已连相机热点, 相机 IP 通常 192.168.1.1:15740)
+        if (isWifi) {
+            Surface(
+                color = NikonSurface,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Wi-Fi 直连 (PTP/IP)",
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NikonYellow,
+                    )
+                    OutlinedTextField(
+                        value = wifiIp,
+                        onValueChange = { wifiIp = it },
+                        label = { Text("相机 IP", fontSize = 12.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = wifiPortText,
+                        onValueChange = { wifiPortText = it },
+                        label = { Text("端口", fontSize = 12.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = {
+                            onWifiConnect(wifiIp, wifiPortText.toIntOrNull() ?: 15740)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NikonYellow,
+                            contentColor = NikonBlack,
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                    ) {
+                        Text("连接 Wi-Fi 相机", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+
+        // 扫描按钮(BLE 不依赖 native handle, 始终可用; USB/Wi-Fi 服务未就绪时禁用)
         Button(
-            onClick = onScan,
-            enabled = serviceReady,
+            onClick = { if (isBle) onBleScan() else onScan() },
+            enabled = if (isBle) true else serviceReady,
             colors = ButtonDefaults.buttonColors(
                 containerColor = NikonYellow,
                 disabledContainerColor = NikonYellow.copy(alpha = 0.3f),
@@ -334,6 +461,7 @@ private fun ScanContent(
         ) {
             Text(
                 when {
+                    isBle -> if (bleDevices.isEmpty()) "扫描蓝牙设备" else "重新扫描"
                     !serviceReady -> "服务启动中…"
                     cameras.isEmpty() && error == null -> "扫描设备"
                     else -> "重新扫描"
@@ -342,8 +470,16 @@ private fun ScanContent(
             )
         }
 
-        // 发现的设备列表
-        if (cameras.isNotEmpty()) {
+        // 发现的设备列表 (BLE / USB-WiFi 二选一)
+        if (isBle) {
+            if (bleDevices.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                bleDevices.forEach { dev ->
+                    BleDeviceCard(device = dev, onConnect = { onBleConnect(dev.address) })
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        } else if (cameras.isNotEmpty()) {
             Spacer(Modifier.height(24.dp))
             cameras.forEach { cam ->
                 CameraDeviceCard(camera = cam, onConnect = { onConnect(cam.id) })
@@ -417,21 +553,62 @@ private fun CameraDeviceCard(camera: CameraInfo, onConnect: () -> Unit) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 电量条
-                    BatteryIndicator(level = camera.batteryLevel)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "${camera.batteryLevel}%",
-                        color = if (camera.batteryLevel > 20) NikonGreen else NikonRed,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+                    // 电量条: level<0 表示未知
+                    if (camera.batteryLevel >= 0) {
+                        BatteryIndicator(level = camera.batteryLevel)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${camera.batteryLevel}%",
+                            color = if (camera.batteryLevel > 20) NikonGreen else NikonRed,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    } else {
+                        Text(
+                            "电量未知",
+                            color = NikonText3,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
             Icon(
                 imageVector = Icons.Filled.ChevronRight,
                 contentDescription = null,
                 tint = NikonText3,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** BLE 设备卡片: 名称 + MAC + RSSI, 点击触发唤醒连接 */
+@Composable
+private fun BleDeviceCard(device: BleManager.Device, onConnect: () -> Unit) {
+    Surface(
+        color = NikonSurface,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = onConnect)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(device.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = NikonText)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${device.address} · ${device.rssi} dBm",
+                    color = NikonText3, fontSize = 11.sp,
+                )
+            }
+            Icon(
+                imageVector = Icons.Filled.Bluetooth,
+                contentDescription = null,
+                tint = NikonBlue,
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -683,53 +860,80 @@ private fun StatusCard(info: CameraInfo, isTransferring: Boolean) {
                 Column {
                     Text("电量", fontSize = 11.sp, color = NikonText3)
                     Spacer(Modifier.height(6.dp))
-                    BatteryIndicator(level = info.batteryLevel)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "${info.batteryLevel}%",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = when {
-                            info.batteryLevel > 60 -> NikonGreen
-                            info.batteryLevel > 20 -> NikonYellow
-                            else -> NikonRed
-                        },
-                    )
+                    if (info.batteryLevel >= 0) {
+                        BatteryIndicator(level = info.batteryLevel)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "${info.batteryLevel}%",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = when {
+                                info.batteryLevel > 60 -> NikonGreen
+                                info.batteryLevel > 20 -> NikonYellow
+                                else -> NikonRed
+                            },
+                        )
+                    } else {
+                        // 未知(如 Wi-Fi 连接): 显示占位, 不误导
+                        BatteryIndicator(level = 0)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "未知",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = NikonText3,
+                        )
+                    }
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text("存储空间", fontSize = 11.sp, color = NikonText3)
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        "${info.storageFreeGb.toInt()} GB 可用",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = NikonText,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "共 ${info.storageTotalGb.toInt()} GB",
-                        fontSize = 12.sp,
-                        color = NikonText2,
-                    )
+                    if (info.storageTotalGb >= 0) {
+                        Text(
+                            "${info.storageFreeGb.toInt()} GB 可用",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NikonText,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "共 ${info.storageTotalGb.toInt()} GB",
+                            fontSize = 12.sp,
+                            color = NikonText2,
+                        )
+                    } else {
+                        Text(
+                            "未知",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NikonText3,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "Wi-Fi 连接",
+                            fontSize = 12.sp,
+                            color = NikonText2,
+                        )
+                    }
                 }
             }
 
-            // 存储进度条
-            Spacer(Modifier.height(12.dp))
-            val usedRatio = if (info.storageTotalGb > 0)
-                ((info.storageTotalGb - info.storageFreeGb) / info.storageTotalGb).toFloat()
-            else 0f
+            // 存储进度条 (存储未知时不渲染)
+            if (info.storageTotalGb > 0) {
+                Spacer(Modifier.height(12.dp))
+                val usedRatio = ((info.storageTotalGb - info.storageFreeGb) / info.storageTotalGb).toFloat()
 
-            LinearProgressIndicator(
-                progress = usedRatio,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = if (usedRatio < 0.7f) NikonYellow else NikonOrange,
-                trackColor = NikonSurface3,
-            )
+                LinearProgressIndicator(
+                    progress = usedRatio,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = if (usedRatio < 0.7f) NikonYellow else NikonOrange,
+                    trackColor = NikonSurface3,
+                )
+            }
         }
     }
 }

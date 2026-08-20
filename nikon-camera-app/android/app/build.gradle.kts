@@ -27,7 +27,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
+            // 相机 USB/BLE 连接工具仅在 ARM 手机使用, 无需 x86 ChromeOS 支持
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+
+        lint {
+            // 仅打包 ARM 原生库是刻意选择(相机硬件工具), 忽略 ChromeOS ABI 告警
+            disable += "ChromeOsAbiSupport"
+            // mipmap-anydpi-v26 的 adaptive-icon 需 v26 目录语义(minSdk 恰好=26),
+            // AAPT2 依赖该目录正确处理启动图标, 属平台约定而非冗余
+            disable += "ObsoleteSdkInt"
         }
 
         // 配置 USB host intent-filter 资源
@@ -119,6 +128,10 @@ dependencies {
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // Security — FTP 密码等敏感设置用 EncryptedSharedPreferences (Keystore) 加密存储。
+    // 1.1.0-alpha06 提供新版 MasterKey.Builder API(1.0.0 仅旧版 MasterKeys,已废弃)。
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // USB (Android 系统 API, 无需额外依赖)
     // android.hardware.usb.UsbManager

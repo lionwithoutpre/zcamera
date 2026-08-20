@@ -23,6 +23,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.nikon.app.jni.CameraBridge
+import com.nikon.app.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,6 +61,9 @@ class CameraService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 设置仓库: 读取上次 WiFi 连接端点用于断连重连 (与 ViewModel 同一存储) */
+    private val settingsRepo by lazy { SettingsRepository(this) }
 
     // 当前正在等待权限的 USB 设备 (仅一个)
     private var pendingUsbDevice: UsbDevice? = null
@@ -154,6 +158,9 @@ class CameraService : Service() {
             ACTION_CONNECT -> {
                 val cameraId = intent.getStringExtra(EXTRA_CAMERA_ID)
                     ?: return START_STICKY
+                // handle 守卫: onTaskRemoved 后 Service 可能仍存活但 handle 已置 0,
+                // 直接调 native 会传入空指针 (JNI 层已兼容守卫, 这里双保险)
+                if (handle == 0L) return START_STICKY
                 serviceScope.launch {
                     val rc = CameraBridge.nativeConnect(handle, cameraId)
                     if (rc == CameraBridge.CAM_OK) {
@@ -164,6 +171,7 @@ class CameraService : Service() {
                 }
             }
             ACTION_DISCONNECT -> {
+                if (handle == 0L) return START_STICKY
                 serviceScope.launch {
                     CameraBridge.nativeDisconnect(handle)
                     updateNotification("已断开")
@@ -179,8 +187,11 @@ class CameraService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 用户从最近任务划掉 App 时,系统不保证调 onDestroy,这里兜底清理
+        // 用户从最近任务划掉 App 时,系统不保证调 onDestroy,这里兜底清理。
+        // 必须 stopSelf: 否则前台服务继续存活但 handle 已置 0,
+        // 后续 USB 插入/Intent 会用空 handle 调 native 导致崩溃。
         cleanup()
+        stopSelf()
         super.onTaskRemoved(rootIntent)
     }
 
@@ -252,11 +263,7 @@ class CameraService : Service() {
             }
             val pi = PendingIntent.getBroadcast(
                 this, 0, permissionIntent,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    PendingIntent.FLAG_IMMUTABLE
-                } else {
-                    0
-                }
+                PendingIntent.FLAG_IMMUTABLE
             )
             usbManager.requestPermission(device, pi)
             updateNotification("请求 USB 权限...")
@@ -346,6 +353,12 @@ class CameraService : Service() {
 
         serviceScope.launch(Dispatchers.IO) {
             try {
+                // 0) handle 守卫: 服务未就绪(handle=0)时不能注入 fd
+                if (handle == 0L) {
+                    updateNotification("相机服务未就绪,无法连接")
+                    return@launch
+                }
+
                 // 1) 打开 USB 设备连接
                 val connection = usbManager.openDevice(device)
                 if (connection == null) {
@@ -490,11 +503,20 @@ class CameraService : Service() {
 
     /**
      * WiFi 断连重连策略: 最多 5 次, 间隔 3s。
-     * 重连成功后重新建立 PTP 会话。
+     * 用 ViewModel 上次成功连接时持久化的 ip/port 重新发起 PTP/IP 连接,
+     * 成功后重新建立 PTP 会话。无历史记录时直接放弃。
      */
     private fun startWifiReconnect() {
         wifiReconnectJob?.cancel()
         wifiReconnectJob = serviceScope.launch {
+            val ip = settingsRepo.lastWifiIp()
+            val port = settingsRepo.lastWifiPort()
+            if (ip.isNullOrEmpty()) {
+                Log.w(TAG, "无历史 WiFi 连接记录, 跳过重连")
+                updateNotification("WiFi 已断开")
+                return@launch
+            }
+
             val maxRetries = 5
             val intervalMs = 3_000L
             for (attempt in 1..maxRetries) {
@@ -502,13 +524,14 @@ class CameraService : Service() {
                 delay(intervalMs)
 
                 if (handle == 0L) return@launch
-                // 尝试重新连接 (native 层会重新建立 TCP + PTP 会话)
-                val status = CameraBridge.nativeGetStatus(handle)
-                if (status == CameraBridge.STATUS_CONNECTED) {
-                    Log.i(TAG, "WiFi 重连成功")
+                // 真正重连: 重新建立 TCP + PTP 会话
+                val rc = CameraBridge.nativeConnectWifi(handle, ip, port)
+                if (rc == CameraBridge.CAM_OK) {
+                    Log.i(TAG, "WiFi 重连成功 ($ip:$port)")
                     updateNotification("已连接 (WiFi)")
                     return@launch
                 }
+                Log.w(TAG, "WiFi 重连尝试 $attempt 失败 rc=$rc")
             }
             Log.w(TAG, "WiFi 重连失败 ($maxRetries 次)")
             updateNotification("WiFi 连接失败, 请检查网络")
@@ -525,6 +548,9 @@ class CameraService : Service() {
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
             if (pm.isIgnoringBatteryOptimizations(packageName)) return
+            // 相机长连接/传输需要持续后台运行, 请求豁免电池优化属合理场景
+            // (Play 政策限制的是滥用, 相机工具需前台连接保持)
+            @Suppress("BatteryLife")
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = android.net.Uri.parse("package:$packageName")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -538,15 +564,13 @@ class CameraService : Service() {
     // ─── 通知 ────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Nikon 相机连接",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "相机连接与传输状态" }
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Nikon 相机连接",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "相机连接与传输状态" }
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(channel)
     }
 
     private fun buildNotification(status: String): Notification {

@@ -107,13 +107,13 @@ class GalleryScreenTest {
         composeTestRule.setNikonContent { GalleryScreen(vm) }
         composeTestRule.settle()
 
-        // 选中 NEF → "已选 1 张"
-        composeTestRule.onNodeWithText("NEF").performClick()
+        // 长按 NEF 选中 → "已选 1 张"
+        composeTestRule.onNodeWithText("NEF").performTouchInput { longClick(center) }
         composeTestRule.settle()
         composeTestRule.onNodeWithText("已选 1 张").assertIsDisplayed()
 
-        // 再选中 JPG → "已选 2 张"
-        composeTestRule.onNodeWithText("JPG").performClick()
+        // 再长按 JPG 选中 → "已选 2 张"
+        composeTestRule.onNodeWithText("JPG").performTouchInput { longClick(center) }
         composeTestRule.settle()
         composeTestRule.onNodeWithText("已选 2 张").assertIsDisplayed()
     }
@@ -124,8 +124,8 @@ class GalleryScreenTest {
         composeTestRule.setNikonContent { GalleryScreen(vm) }
         composeTestRule.settle()
 
-        // 选中 NEF(objectHandle=1)
-        composeTestRule.onNodeWithText("NEF").performClick()
+        // 长按选中 NEF(objectHandle=1)
+        composeTestRule.onNodeWithText("NEF").performTouchInput { longClick(center) }
         composeTestRule.settle()
         composeTestRule.onNodeWithText("已选 1 张").assertIsDisplayed()
 
@@ -155,16 +155,29 @@ class GalleryScreenTest {
     }
 
     @Test
-    fun longPressThumbnail_opensDetailCard() {
+    fun clickThumbnail_opensDetailCard() {
         vm.connect("cam1")
         composeTestRule.setNikonContent { GalleryScreen(vm) }
         composeTestRule.settle()
 
-        // 单击缩略图是「选中」, 详情卡走长按(此前 onOpen 是死代码, 现已接长按)
-        composeTestRule.onNodeWithText("NEF").performTouchInput { longClick(center) }
+        // 单击缩略图打开详情卡(常见相册交互); 长按才是多选
+        composeTestRule.onNodeWithText("NEF").performClick()
         composeTestRule.settle()
 
         // 文件详情卡标题出现
         composeTestRule.onNodeWithText("文件详情").assertIsDisplayed()
+    }
+
+    @Test
+    fun longPressThumbnail_selectsInsteadOfOpen() {
+        vm.connect("cam1")
+        composeTestRule.setNikonContent { GalleryScreen(vm) }
+        composeTestRule.settle()
+
+        // 长按 → 多选, 不应打开详情卡
+        composeTestRule.onNodeWithText("NEF").performTouchInput { longClick(center) }
+        composeTestRule.settle()
+        composeTestRule.onNodeWithText("已选 1 张").assertIsDisplayed()
+        composeTestRule.onNodeWithText("文件详情").assertDoesNotExist()
     }
 }

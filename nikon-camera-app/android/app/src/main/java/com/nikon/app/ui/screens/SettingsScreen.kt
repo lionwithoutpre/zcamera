@@ -4,6 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
@@ -243,17 +246,77 @@ fun SettingsScreen(
                     expanded = showFtpConfig,
                     onToggle = { showFtpConfig = it },
                 ) {
-                    Column(Modifier.padding(top = 12.dp)) {
-                        Text("FTP 功能目前由 Workflow Studio 处理", fontSize = 12.sp, color = NikonText3)
-                        Spacer(Modifier.height(8.dp))
+                    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // 加密存储不可用时的安全警告(密码将明文落盘)
+                        if (!viewModel.secretStorageAvailable) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(NikonRed.copy(alpha = 0.12f))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Filled.Warning, null,
+                                    tint = NikonRed, modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "系统加密不可用, 密码将以明文存储, 请注意安全",
+                                    fontSize = 12.sp,
+                                    color = NikonRed,
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = settings.ftpHost,
+                            onValueChange = { viewModel.updateSettings { s -> s.copy(ftpHost = it) } },
+                            label = { Text("FTP 主机", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = settings.ftpPort.toString(),
+                            onValueChange = { text ->
+                                val p = text.toIntOrNull() ?: 21
+                                viewModel.updateSettings { s -> s.copy(ftpPort = p) }
+                            },
+                            label = { Text("端口", fontSize = 12.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = settings.ftpUsername,
+                            onValueChange = { viewModel.updateSettings { s -> s.copy(ftpUsername = it) } },
+                            label = { Text("用户名 (空 = anonymous)", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = settings.ftpPassword,
+                            onValueChange = { viewModel.updateSettings { s -> s.copy(ftpPassword = it) } },
+                            label = { Text("密码", fontSize = 12.sp) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = settings.ftpRemotePath,
+                            onValueChange = { viewModel.updateSettings { s -> s.copy(ftpRemotePath = it) } },
+                            label = { Text("远端目录", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(2.dp))
                         ToggleRow(
                             title = "FTPS 加密",
-                            subtitle = "TLS 加密传输",
+                            subtitle = "TLS 加密传输 (需 TLS 库, 当前降级明文)",
                             checked = settings.ftpsEncryption,
                             onToggle = { viewModel.updateSettings { s -> s.copy(ftpsEncryption = it) } },
                             compact = true,
                         )
-                        Spacer(Modifier.height(6.dp))
                         ToggleRow(
                             title = "自动上传",
                             subtitle = "传输完成后上传至 FTP",

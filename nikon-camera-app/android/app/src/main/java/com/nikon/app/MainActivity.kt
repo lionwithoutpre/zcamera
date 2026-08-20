@@ -66,11 +66,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCameraService() {
+        // 若 handle 已非 0, 说明 CameraService 前台服务已在运行(如 Activity 重建/旋转),
+        // 此时重复 startForegroundService 会无谓触发 onStartCommand + 通知刷新, 直接跳过。
+        // 冷启动(handle==0)才真正需要拉起 Service, 由其 onCreate 调 nativeCreate。
+        if ((application as NikonApplication).cameraHandle != 0L) return
         val intent = Intent(this, CameraService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        startForegroundService(intent)
     }
 }

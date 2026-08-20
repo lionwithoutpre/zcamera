@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: 'ebdb4d26-ed17-492f-9fd6-410b79ab2461'
+  PropagateID: 'ebdb4d26-ed17-492f-9fd6-410b79ab2461'
+  ReservedCode1: '7124f16e-b173-4a60-93d5-d5de6bc98ba2'
+  ReservedCode2: '7124f16e-b173-4a60-93d5-d5de6bc98ba2'
+---
+
 # Nikon Camera Connect — Agent 开发指南
 
 > 本文档供 AI Agent / 新接手开发者快速理解项目全貌，遵循项目约定，正确产出代码。
@@ -32,32 +43,33 @@ nikon-camera-app/
 │   ├── protocol/{ptp.c,mtp.c,session.c}
 │   ├── adapter/{nikon_adapter.c,command_map.c,wifi_adapter.c}
 │   ├── transfer/{chunked.c,zerocopy.c}
-│   ├── hal/{usb_linux.c,usb_android.c,wifi.c}
-│   └── event/event.c
+│   ├── hal/usb/{usb_linux.c,usb_macos.c,usb_win.c,usb_stub.c}
+│   ├── hal/bluetooth/{ble_linux.c,ble_macos.c,ble_win.c}   # 无 ble_android.c
+│   └── hal/wifi/{wifi_posix.c,wifi_pw_obfuscate.c}
 ├── android/
 │   └── app/
 │       ├── build.gradle.kts          # Android 构建（compileSdk 34, minSdk 26）
 │       └── src/main/
 │           ├── AndroidManifest.xml   # USB host + 前台服务 + 通知权限
 │           ├── jni/
-│           │   ├── jni_bridge.c      # JNI 桥接（~460 行,18 个 native 函数）
+│           │   ├── jni_bridge.c      # JNI 桥接（~700 行,~20 个 native 函数）
 │           │   └── CMakeLists.txt    # 链接 core + jnigraphics + log
 │           └── java/com/nikon/app/
 │               ├── NikonApplication.kt   # 全局 Application,持有 cameraHandle
 │               ├── MainActivity.kt       # 唯一 Activity,启动 Service + Compose
 │               ├── jni/CameraBridge.kt   # native 声明 + 常量 + TransferProgressCallback
 │               ├── service/CameraService.kt  # 前台服务,USB 热插拔 + handle 生命周期
-│               ├── viewmodel/CameraViewModel.kt  # ~700 行,所有业务状态与方法
+│               ├── viewmodel/CameraViewModel.kt  # ~760 行,所有业务状态与方法
 │               └── ui/
 │                   ├── navigation/NavGraph.kt   # 5 tab + LV 全屏
 │                   ├── theme/                    # 黑黄配色 NikonYellow #F5B800
-│                   └── screens/                  # 6 个 Screen
+│                   └── screens/                 # 6 个 Screen
 │                       ├── HomeScreen.kt         # 扫描连接 + 仪表盘
-│                       ├── LiveViewScreen.kt     # 实时取景全屏
-│                       ├── GalleryScreen.kt      # 文件浏览 + 批量传输
-│                       ├── TransferScreen.kt     # 传输任务四分区
-│                       ├── PresetScreen.kt       # 预设管理
-│                       └── SettingsScreen.kt     # 设置 + App 设置
+│                       ├── LiveViewScreen.kt    # 实时取景全屏
+│                       ├── GalleryScreen.kt     # 文件浏览 + 批量传输
+│                       ├── TransferScreen.kt    # 传输任务四分区
+│                       ├── PresetScreen.kt      # 预设管理
+│                       └── SettingsScreen.kt    # 设置 + App 设置
 ├── desktop/
 │   ├── CMakeLists.txt
 │   └── src/
@@ -111,14 +123,14 @@ nikon-camera-app/
 
 ### 4.2 传输管理
 
-**任务 ID**：用 native 层返回的 `nativeJobId` 作为 job 唯一标识。WAITING 排队任务用负数 tempId 占位，启动后替换为 nativeJobId。
+**任务 ID（v3 重构）**：`TransferJob.id` 是稳定 UI 侧 id（单调递增、创建后永不变化），续传/重传原地更新同一任务。native 层返回的任务 id 存 `TransferJob.nativeJobId` 字段，仅用于匹配 JNI 进度回调。**不再用负数 tempId 占位再替换**（旧设计会带来 UI key 抖动与中间重复项）。所有列表变更走 `StateFlow.update` 原子操作，JNI 进度回调线程与主线程并发时不丢更新。
 
 **并发控制**：`startTransfer` 检查 `activeCount >= settings.concurrentJobs`，超限排队 WAITING。任务完成（DONE/FAILED）后 `promoteNextWaiting()` 带并发校验地提升下一个。
 
 **进度回调**：
 - JNI 层 `nativeRegisterProgressCallback` 注册 C 回调
 - C 回调通过 `AttachCurrentThread` → `CallVoidMethod(onProgress)` 桥接到 Kotlin
-- ViewModel 的 `transferProgressCallback` 对象映射 status（0/1→ACTIVE, 2→DONE, -1→FAILED）+ updateJob + promote
+- `TransferManager.onNativeProgress` 按 nativeJobId 匹配任务，映射 status（0/1→ACTIVE, 2→DONE, -1→FAILED）+ update + promote；**终态任务幂等**（重复 DONE/FAILED 回调被忽略，避免重复保存相册/FTP 上传）
 - **不要**在 `nativeStartTransfer` 返回后直接标 DONE（那是异步传输刚启动，靠 progress 回调的 status=2 才算完成）
 
 **断点续传**：native 层支持 offset 续传，`resumeTransfer` 重新对同一 objectHandle 调 `nativeStartTransfer`。
@@ -252,7 +264,7 @@ ctest --output-on-failure
 
 - **传输进度**：已通过 JNI 回调实现实时更新
 - **多相机支持**：当前单连接，多相机切换需断开重连
-- **FTP 上传**：core 层 `camera_api_export_to_ftp` 返回 NOT_SUPPORTED（占位）
+- **FTP 上传**：core 层 `camera_api_export_to_ftp` 已实现（`ftp_client_upload`，异步线程上传并 detach），Android JNI/Kotlin/UI 均有完整支持
 - **BLE 唤醒**：UI 有入口，HAL 层未实现
 - **Picture Control 预设持久化**：桌面端用 QSettings，Android 端待加
 
@@ -272,3 +284,5 @@ ctest --output-on-failure
 
 **文档版本**：v1.0 · 2026-07-02
 **代码规模**：核心 C ~2200 行 + JNI ~460 行 + Kotlin ~4500 行 + Qt ~3200 行 ≈ 10000 行
+
+> AI生成

@@ -70,16 +70,17 @@ fun LiveViewScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
     val connected = status == com.nikon.app.jni.CameraBridge.STATUS_CONNECTED ||
                     status == com.nikon.app.jni.CameraBridge.STATUS_TRANSFERRING
-    val batteryLevel = cameras.firstOrNull()?.batteryLevel ?: 0
+    val batteryLevel = cameras.firstOrNull()?.batteryLevel ?: -1
     val shutter = props.shutterSpeed
     val aperture = props.aperture
     val iso = props.iso
     val ev = props.ev
 
-    // 实时取景帧:进页面 startLiveView,退出 stopLiveView(仅连接时)
+    // 实时取景帧:连接后进页面 startLiveView,退出 stopLiveView。
+    // key 依赖 connected: 进页面时未连接、之后连上相机的场景也要能启动 LV
     val lvFrame by viewModel.liveViewFrame.collectAsStateWithLifecycle()
     val lvActive by viewModel.liveViewActive.collectAsStateWithLifecycle()
-    DisposableEffect(Unit) {
+    DisposableEffect(connected) {
         if (connected) viewModel.startLiveView()
         onDispose { viewModel.stopLiveView() }
     }
@@ -167,7 +168,10 @@ fun LiveViewScreen(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Text("${batteryLevel}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NikonText)
+            Text(
+                if (batteryLevel >= 0) "${batteryLevel}%" else "--",
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NikonText,
+            )
         }
 
         // ── 3. AF 模式三段切换(顶部居中)──
@@ -196,13 +200,12 @@ fun LiveViewScreen(
             onZoomIn = {
                 if (zoom < 1f) {
                     zoom = (zoom + 0.1f).coerceAtMost(1f)
-                    viewModel.setProperty(LvProp.ZOOM, (zoom * 10).toLong())
+                    // 变焦无标准 PTP 设备属性码, 暂仅更新本地 UI 指示 (见 propIdFor 注释)
                 }
             },
             onZoomOut = {
                 if (zoom > 0f) {
                     zoom = (zoom - 0.1f).coerceAtLeast(0f)
-                    viewModel.setProperty(LvProp.ZOOM, (zoom * 10).toLong())
                 }
             },
             modifier = Modifier
@@ -236,7 +239,12 @@ fun LiveViewScreen(
                         values = values,
                         currentValue = current,
                         onValueSelected = { newVal ->
-                            // 模拟设置参数 (实际应通过 PTP 下发)
+                            // 真实下发: 刻度尺值 → 编码 → PTP SetDevicePropValue
+                            val propId = propIdFor(param)
+                            val encoded = encodeParamValue(param, newVal)
+                            if (propId != 0 && encoded != 0L) {
+                                viewModel.setProperty(propId, encoded)
+                            }
                             adjustingParam = null
                         },
                         modifier = Modifier.padding(bottom = 8.dp),
@@ -269,23 +277,46 @@ fun LiveViewScreen(
     }
 }
 
-// ─── PTP 属性码占位(实际码以 SPEC_PROTOCOL 为准)──
-private object LvProp {
-    const val AF_MODE   = 0x500C
-    const val ZOOM      = 0x5010
-    const val SHUTTER   = 0x500D
-    const val APERTURE  = 0x500E
-    const val ISO       = 0x500F
-    const val EV        = 0x5011
+/** 参数名 → 尼康 PTP 设备属性码 (与 CameraBridge 常量一致) */
+private fun propIdFor(param: String): Int = when (param) {
+    "快门" -> com.nikon.app.jni.CameraBridge.PROP_SHUTTER_SPEED
+    "光圈" -> com.nikon.app.jni.CameraBridge.PROP_APERTURE
+    "ISO"  -> com.nikon.app.jni.CameraBridge.PROP_ISO
+    "EV"   -> com.nikon.app.jni.CameraBridge.PROP_EXPOSURE_COMP
+    else   -> 0
 }
 
-/** 参数名 → PTP 属性码 */
-private fun propIdFor(param: String): Int = when (param) {
-    "快门" -> LvProp.SHUTTER
-    "光圈" -> LvProp.APERTURE
-    "ISO"  -> LvProp.ISO
-    "EV"   -> LvProp.EV
-    else   -> 0
+/**
+ * 将刻度尺显示值编码为 PTP 数值 (与 CameraViewModel 的 formatXxx 互逆):
+ *  - 快门: "1/250"→250, "30\""→-30, "Bulb"→0
+ *  - 光圈: "f/5.6"→56 (值 = f 数 × 10)
+ *  - ISO:   "800"→800
+ *  - EV:    "+0.7"→7 (值 = EV × 10)
+ * 注: PTP 快门/光圈实际为档位编码, 此处沿用核心库既有的线性约定;
+ *     小数档位 (如 0.4"/1.3") 做四舍五入近似。
+ */
+private fun encodeParamValue(param: String, label: String): Long {
+    return when (param) {
+        "快门" -> when {
+            label == "Bulb" -> 0L
+            label.endsWith("\"") -> {
+                val v = label.dropLast(1).toDoubleOrNull() ?: return 0L
+                -Math.round(v).toLong().coerceAtMost(-1L)
+            }
+            label.startsWith("1/") -> label.removePrefix("1/").toLongOrNull() ?: 0L
+            else -> label.toLongOrNull() ?: 0L
+        }
+        "光圈" -> {
+            val f = label.removePrefix("f/").toDoubleOrNull() ?: return 0L
+            Math.round(f * 10).toLong()
+        }
+        "ISO" -> label.toLongOrNull() ?: 0L
+        "EV" -> {
+            val v = label.trimEnd('E', 'V').toDoubleOrNull() ?: return 0L
+            Math.round(v * 10).toLong()
+        }
+        else -> 0L
+    }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -293,13 +324,17 @@ private fun propIdFor(param: String): Int = when (param) {
 // ────────────────────────────────────────────────────────────
 
 /** 真实取景帧渲染:JPEG 字节 → Bitmap → Image,fillMaxSize 裁剪居中
- *  内存管理:用 produceState 持有当前 Bitmap,帧切换时回收旧帧,避免竞态 */
+ *  内存管理:用 produceState 持有当前 Bitmap,帧切换时回收旧帧,避免竞态。
+ *  性能:produceState 块默认跑在组合(主)线程,30fps JPEG 解码会卡 UI,
+ *  必须 withContext 切到 Default 调度器。 */
 @Composable
 private fun BoxScope.LiveViewFrame(frame: ByteArray) {
     // produceState 保证:每次 frame 变化时在新协程解码,recycle 上一帧
     // 旧 Bitmap 一定在 produceState 的 awaitDispose 里被回收,渲染层不会引用已 recycle 的
     val bitmapState by produceState<android.graphics.Bitmap?>(initialValue = null, frame) {
-        val newBitmap = android.graphics.BitmapFactory.decodeByteArray(frame, 0, frame.size)
+        val newBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            android.graphics.BitmapFactory.decodeByteArray(frame, 0, frame.size)
+        }
         value = newBitmap
         awaitDispose {
             newBitmap?.let { if (!it.isRecycled) it.recycle() }

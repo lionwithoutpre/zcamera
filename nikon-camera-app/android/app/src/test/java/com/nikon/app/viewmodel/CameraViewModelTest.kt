@@ -169,7 +169,8 @@ class CameraViewModelTest {
         runCurrent()
         assertEquals(1, vm.transferJobs.value.size)
         val job = vm.transferJobs.value.first()
-        assertEquals(100, job.id)
+        // v3: 稳定 UI id 与 native 任务 id 分离,native 返回值存 nativeJobId
+        assertEquals(100, job.nativeJobId)
         assertEquals(TransferStatus.ACTIVE, job.status)
     }
 
@@ -205,7 +206,7 @@ class CameraViewModelTest {
         // 模拟 native 回调:50%, 30 MB/s, 传输中
         triggerProgressCallback(42, 30.0, 50, 1)
         runCurrent()
-        val job = vm.transferJobs.value.first { it.id == 42 }
+        val job = vm.transferJobs.value.first { it.nativeJobId == 42 }
         assertEquals(50, job.percent)
         assertEquals(30.0, job.speedMbps, 0.01)
         assertEquals(TransferStatus.ACTIVE, job.status)
@@ -219,7 +220,7 @@ class CameraViewModelTest {
         runCurrent()
         triggerProgressCallback(10, 40.0, 100, 2)
         runCurrent()
-        val job = vm.transferJobs.value.first { it.id == 10 }
+        val job = vm.transferJobs.value.first { it.nativeJobId == 10 }
         assertEquals(TransferStatus.DONE, job.status)
         assertEquals(100, job.percent)
     }
@@ -232,7 +233,7 @@ class CameraViewModelTest {
         runCurrent()
         triggerProgressCallback(10, 0.0, 30, -1)
         runCurrent()
-        val job = vm.transferJobs.value.first { it.id == 10 }
+        val job = vm.transferJobs.value.first { it.nativeJobId == 10 }
         assertEquals(TransferStatus.FAILED, job.status)
     }
 
@@ -242,9 +243,10 @@ class CameraViewModelTest {
         every { api.nativeStartTransfer(any(), any(), any()) } returns 5
         vm.startTransfer(0x01, "/tmp/test.nef")
         runCurrent()
-        vm.cancelTransfer(5)
+        // v3: cancelTransfer 按稳定 UI id(首个任务为 1),内部解析 nativeJobId 通知 native
+        vm.cancelTransfer(1)
         runCurrent()
-        val job = vm.transferJobs.value.first { it.id == 5 }
+        val job = vm.transferJobs.value.first { it.nativeJobId == 5 }
         assertEquals(TransferStatus.CANCELLED, job.status)
     }
 

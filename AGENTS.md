@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '57a6bbb3-09e3-412b-a17e-326995936780'
+  PropagateID: '57a6bbb3-09e3-412b-a17e-326995936780'
+  ReservedCode1: '9cdf5498-7d29-4b41-9468-a53e3e040d56'
+  ReservedCode2: '9cdf5498-7d29-4b41-9468-a53e3e040d56'
+---
+
 # AGENTS.md
 
 This file provides guidance to Lingma (lingma.aliyun.com) when working with code in this repository.
@@ -104,6 +115,20 @@ CMake 根据 `CMAKE_SYSTEM_NAME` 自动选择 HAL 源文件：
 - 存储路径用 `getExternalFilesDir(DCIM)/NikonConnect/`，禁止写公共 `/DCIM/`
 - USB 接口声明三级优先: class=6 → class=255 → 第一个可用接口
 
+### Android 模块划分（阶段1-4 重构后）
+- `:core:model` — 纯 Kotlin 领域模型（CameraInfo/CameraFile/CameraProperties/PictureControl/TransferJob/AppSettings），无 Android 依赖
+- `:core:data` — Android 库：`SettingsRepository`（设置持久化/加密存储）、`StorageManager`（分区存储适配）
+- `:app` — UI + 业务编排：
+  - `jni/` — `CameraBridge`（不可移动，C 层 JNI 静态命名绑定）+ `CameraApi` 接口
+  - `viewmodel/CameraViewModel` — 门面类，公有 API 与 StateFlow 稳定，内部委托给领域 Manager
+  - `viewmodel/ConnectionManager` — 扫描/连接(USB/Wi-Fi)/断开/BLE/状态事件
+  - `viewmodel/CameraMediaManager` — 文件列举/缩略图/删除/传输路径
+  - `viewmodel/LiveViewManager` — 实时取景启停/帧轮询
+  - `viewmodel/CameraSettingsManager` — 参数轮询/格式化/设置持久化/FTP/拍摄
+  - `transfer/TransferManager` — 传输任务状态机（并发控制/排队/续传）
+- 约束：`CameraBridge` 类名与包名（`com.nikon.app.jni`）不可移动；领域 Manager 不持有 handle 生命周期，只读 `handleProvider`
+- 单测通过反射访问 ViewModel 私有成员（`transferProgressCallback`/`buildDestPath`/`formatXxx`），门面类须保留这些兼容点
+
 ### 错误码体系
 - `CAM_OK=0`，业务错误 -100~-105，传输错误 -200~-201，内存/权限 -300~-301，硬件 -400~-402，协议 -500
 
@@ -113,7 +138,8 @@ CMake 根据 `CMAKE_SYSTEM_NAME` 自动选择 HAL 源文件：
 
 ## 已知限制
 
-- FTP 上传为占位实现（返回 NOT_SUPPORTED）
-- BLE 唤醒 HAL 层为桩代码
+- BLE 唤醒指令为保守 0x01 触发（SnapBridge 精确唤醒字节为私有协议，部分机型可能需调整）
 - Windows 零拷贝降级为 read/write（未用 TransmitFile）
 - 单连接模式，不支持多相机同时连接
+
+> AI生成

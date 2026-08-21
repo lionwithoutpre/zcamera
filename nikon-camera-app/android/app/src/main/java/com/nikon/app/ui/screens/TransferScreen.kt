@@ -241,14 +241,14 @@ enum class TfFilter(val label: String) {
 enum class TfStatus { ACTIVE, FAILED, WAITING, DONE, PAUSED, CANCELLED }
 
 /** ViewModel.TransferJob → UI TfJob 映射 */
-private fun com.nikon.app.viewmodel.TransferJob.toUi(): TfJob {
+private fun com.nikon.model.TransferJob.toUi(): TfJob {
     val uiStatus = when (status) {
-        com.nikon.app.viewmodel.TransferStatus.ACTIVE -> TfStatus.ACTIVE
-        com.nikon.app.viewmodel.TransferStatus.WAITING -> TfStatus.WAITING
-        com.nikon.app.viewmodel.TransferStatus.DONE -> TfStatus.DONE
-        com.nikon.app.viewmodel.TransferStatus.FAILED -> TfStatus.FAILED
-        com.nikon.app.viewmodel.TransferStatus.PAUSED -> TfStatus.PAUSED
-        com.nikon.app.viewmodel.TransferStatus.CANCELLED -> TfStatus.CANCELLED
+        com.nikon.model.TransferStatus.ACTIVE -> TfStatus.ACTIVE
+        com.nikon.model.TransferStatus.WAITING -> TfStatus.WAITING
+        com.nikon.model.TransferStatus.DONE -> TfStatus.DONE
+        com.nikon.model.TransferStatus.FAILED -> TfStatus.FAILED
+        com.nikon.model.TransferStatus.PAUSED -> TfStatus.PAUSED
+        com.nikon.model.TransferStatus.CANCELLED -> TfStatus.CANCELLED
     }
     return TfJob(
         id = id,

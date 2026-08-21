@@ -1,4 +1,6 @@
 package com.nikon.app.viewmodel
+import com.nikon.model.CameraInfo
+import com.nikon.model.CameraFile
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

@@ -8,7 +8,7 @@ import com.nikon.app.TestDoubles
 import com.nikon.app.setNikonContent
 import com.nikon.app.jni.CameraBridge
 import com.nikon.app.viewmodel.CameraViewModel
-import com.nikon.app.viewmodel.TransferStatus
+import com.nikon.model.TransferStatus
 import io.mockk.every
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi

@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nikon.app.ui.theme.*
-import com.nikon.app.viewmodel.PictureControl
+import com.nikon.model.PictureControl
 
 /**
  * PresetScreen — 预设中心 / 色彩偏移

@@ -72,7 +72,7 @@ fun GalleryScreen(
 
     // 已传输的 objectHandle 集合(来自 transferJobs DONE 状态)
     val transferredHandles = transferJobs
-        .filter { it.status == com.nikon.app.viewmodel.TransferStatus.DONE }
+        .filter { it.status == com.nikon.model.TransferStatus.DONE }
         .map { it.objectHandle }.toSet()
 
     val sampleFiles = files.map { it.toGalFile(it.objectHandle in transferredHandles) }
@@ -242,7 +242,7 @@ data class GalFile(
 )
 
 /** CameraFile(ViewModel)→ GalFile(UI)映射 */
-private fun com.nikon.app.viewmodel.CameraFile.toGalFile(transferred: Boolean): GalFile {
+private fun com.nikon.model.CameraFile.toGalFile(transferred: Boolean): GalFile {
     val timePart = datetime.substringAfter('T').take(8).ifEmpty { "--:--:--" }
     val datePart = datetime.take(10).replace('-', '/')
     val groupLabel = formatDateGroup(datePart)

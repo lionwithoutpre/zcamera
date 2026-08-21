@@ -10,6 +10,12 @@ import com.nikon.app.jni.TransferProgressCallback
 import com.nikon.app.settings.SettingsRepository
 import com.nikon.app.storage.StorageManager
 import com.nikon.app.transfer.TransferManager
+import com.nikon.model.AppSettings
+import com.nikon.model.CameraFile
+import com.nikon.model.CameraInfo
+import com.nikon.model.CameraProperties
+import com.nikon.model.PictureControl
+import com.nikon.model.TransferJob
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

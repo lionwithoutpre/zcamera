@@ -1,4 +1,5 @@
 package com.nikon.app.viewmodel
+import com.nikon.model.TransferStatus
 
 import app.cash.turbine.test
 import com.nikon.app.NikonApplication

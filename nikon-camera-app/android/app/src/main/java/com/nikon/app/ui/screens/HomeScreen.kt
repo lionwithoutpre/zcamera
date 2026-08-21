@@ -48,7 +48,7 @@ import com.nikon.app.ble.BleManager
 import com.nikon.app.jni.CameraBridge
 import com.nikon.app.ui.components.StatusCapsule
 import com.nikon.app.ui.theme.*
-import com.nikon.app.viewmodel.CameraInfo
+import com.nikon.model.CameraInfo
 import com.nikon.app.viewmodel.CameraViewModel
 
 /**

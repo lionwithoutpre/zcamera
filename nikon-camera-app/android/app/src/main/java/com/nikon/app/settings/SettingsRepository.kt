@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import com.nikon.app.viewmodel.AppSettings
+import com.nikon.model.AppSettings
 
 /**
  * SettingsRepository — App 设置的唯一持久化入口

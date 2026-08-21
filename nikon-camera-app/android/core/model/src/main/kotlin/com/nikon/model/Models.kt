@@ -1,10 +1,10 @@
-package com.nikon.app.viewmodel
+package com.nikon.model
 
 /**
- * Models.kt — ViewModel 层共享数据类
+ * Models.kt — 跨层共享的领域模型
  *
- * 从 CameraViewModel.kt 拆出,保持原包名 `com.nikon.app.viewmodel`,
- * 所有既有 import / 全限定引用无需改动。
+ * 从 `com.nikon.app.viewmodel.Models.kt` 迁移至独立模块 :core:model,
+ * 使数据层/UI 层/测试均可复用, 打破 ViewModel 包名承载模型的耦合。
  */
 
 data class CameraInfo(
@@ -67,7 +67,7 @@ enum class TransferStatus {
     fun isTerminal(): Boolean = this == DONE || this == FAILED || this == CANCELLED
 }
 
-/** 相机拍摄参数(v2) */
+/** 相机拍摄参数 */
 data class CameraProperties(
     val shutterSpeed: String = "--",
     val aperture: String = "--",
@@ -153,7 +153,7 @@ data class AppSettings(
     val wifiPollIntervalMs: Int = 1000,
 )
 
-/** 相机文件(v2,对应 C 层 FileInfo) */
+/** 相机文件(对应 C 层 FileInfo) */
 data class CameraFile(
     val objectHandle: Long,
     val filename: String,

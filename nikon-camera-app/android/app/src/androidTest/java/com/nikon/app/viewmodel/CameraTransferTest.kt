@@ -1,4 +1,5 @@
 package com.nikon.app.viewmodel
+import com.nikon.model.TransferStatus
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider

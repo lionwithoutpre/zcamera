@@ -55,6 +55,8 @@ class FakeCameraApi : CameraApi {
     override fun nativeConnect(handle: Long, cameraId: String): Int = connectRc.also { rec("nativeConnect", handle, cameraId) }
     override fun nativeConnectUsbFd(handle: Long, fd: Int, serial: String): Int =
         connectRc.also { rec("nativeConnectUsbFd", handle, fd, serial) }
+    override fun nativeConnectWifi(handle: Long, ip: String, port: Int): Int =
+        connectRc.also { rec("nativeConnectWifi", handle, ip, port) }
     override fun nativeDisconnect(handle: Long) { rec("nativeDisconnect", handle) }
     override fun nativeGetStatus(handle: Long): Int = 0.also { rec("nativeGetStatus", handle) }
     override fun nativeCapture(handle: Long): Int = captureRc.also { rec("nativeCapture", handle) }
@@ -89,6 +91,16 @@ class FakeCameraApi : CameraApi {
     override fun nativeRegisterProgressCallback(handle: Long, callback: TransferProgressCallback) {
         rec("nativeRegisterProgressCallback", handle)
     }
+    override fun nativeGetProperties(handle: Long, propIds: IntArray): LongArray? =
+        LongArray(propIds.size) { i -> propertyValues[propIds[i]] ?: 0L }
+            .also { rec("nativeGetProperties", handle, propIds) }
+    override fun nativeSetFtpConfig(
+        handle: Long, host: String, port: Int,
+        username: String, password: String, remotePath: String,
+        useTls: Boolean, autoUpload: Boolean,
+    ): Int = 0.also { rec("nativeSetFtpConfig", handle, host, port, username, password, remotePath, useTls, autoUpload) }
+    override fun nativeExportToFtp(handle: Long, localPath: String): Int =
+        0.also { rec("nativeExportToFtp", handle, localPath) }
 }
 
 /**

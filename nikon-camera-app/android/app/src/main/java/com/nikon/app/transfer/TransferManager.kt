@@ -1,9 +1,9 @@
 package com.nikon.app.transfer
 
 import com.nikon.app.jni.CameraApi
-import com.nikon.app.viewmodel.AppSettings
-import com.nikon.app.viewmodel.TransferJob
-import com.nikon.app.viewmodel.TransferStatus
+import com.nikon.model.AppSettings
+import com.nikon.model.TransferJob
+import com.nikon.model.TransferStatus
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope

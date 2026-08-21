@@ -214,7 +214,7 @@ class CameraViewModelTest {
 
     @Test
     fun getProperty_noHandle_returnsZero() = runBlocking {
-        val (vm, api) = createFakeVm(handle = 0L)
+        val (vm, _) = createFakeVm(handle = 0L)
         assertEquals(0L, vm.getProperty(CameraBridge.PROP_ISO))
     }
 

@@ -5,6 +5,7 @@ pluginManagement {
         // 修改时请与 gradle.properties 的 VERSION_AGP / VERSION_KOTLIN 及 docs/VERSIONS.md 保持一致。
         id("com.android.application") version "8.2.2" apply false
         id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+        id("org.jetbrains.kotlin.jvm") version "1.9.22" apply false
     }
     repositories {
         maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
@@ -28,3 +29,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "NikonConnect"
 include(":app")
+include(":core:model")

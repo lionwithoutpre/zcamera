@@ -1,4 +1,4 @@
-package com.nikon.app.settings
+package com.nikon.data.settings
 
 import android.content.Context
 import android.content.SharedPreferences

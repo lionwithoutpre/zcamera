@@ -7,9 +7,9 @@ import com.nikon.app.ble.BleManager
 import com.nikon.app.jni.CameraApi
 import com.nikon.app.jni.CameraBridge
 import com.nikon.app.jni.TransferProgressCallback
-import com.nikon.app.settings.SettingsRepository
-import com.nikon.app.storage.StorageManager
 import com.nikon.app.transfer.TransferManager
+import com.nikon.data.settings.SettingsRepository
+import com.nikon.data.storage.StorageManager
 import com.nikon.model.AppSettings
 import com.nikon.model.CameraFile
 import com.nikon.model.CameraInfo
@@ -614,7 +614,7 @@ class CameraViewModel(
     private fun settingsAlbumDir(): String {
         val raw = _settings.value.storageTarget.trim()
         return raw.substringAfterLast('/').takeIf { it.isNotBlank() }
-            ?: com.nikon.app.storage.StorageManager.DEFAULT_ALBUM_DIR
+            ?: StorageManager.DEFAULT_ALBUM_DIR
     }
 
     /** 便捷方法:用 app 私有目录作为传输目标 */

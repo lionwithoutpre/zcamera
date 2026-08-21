@@ -108,6 +108,8 @@ android {
 dependencies {
     // 领域模型层 (纯 Kotlin, 无 Android 依赖)
     implementation(project(":core:model"))
+    // 数据层 (设置持久化 / 相册存储)
+    implementation(project(":core:data"))
 
     // Kotlin
     implementation("androidx.core:core-ktx:1.12.0")
@@ -131,10 +133,6 @@ dependencies {
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
-
-    // Security — FTP 密码等敏感设置用 EncryptedSharedPreferences (Keystore) 加密存储。
-    // 1.1.0-alpha06 提供新版 MasterKey.Builder API(1.0.0 仅旧版 MasterKeys,已废弃)。
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // USB (Android 系统 API, 无需额外依赖)
     // android.hardware.usb.UsbManager

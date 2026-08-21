@@ -1,4 +1,4 @@
-package com.nikon.app.storage
+package com.nikon.data.storage
 
 import android.content.ContentValues
 import android.content.Context

@@ -91,6 +91,9 @@ class FakeCameraApi : CameraApi {
     override fun nativeRegisterProgressCallback(handle: Long, callback: TransferProgressCallback) {
         rec("nativeRegisterProgressCallback", handle)
     }
+    override fun nativeSetStatusCallback(handle: Long, callback: com.nikon.app.jni.StatusChangeCallback) {
+        rec("nativeSetStatusCallback", handle)
+    }
     override fun nativeGetProperties(handle: Long, propIds: IntArray): LongArray? =
         LongArray(propIds.size) { i -> propertyValues[propIds[i]] ?: 0L }
             .also { rec("nativeGetProperties", handle, propIds) }

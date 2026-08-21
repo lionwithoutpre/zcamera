@@ -115,6 +115,7 @@ class RecordingCameraApi : CameraApi {
     override fun nativeStopLiveView(handle: Long): Int { rec("nativeStopLiveView", handle); return 0 }
     override fun nativeGetLiveViewFrame(handle: Long): ByteArray? = null.also { rec("nativeGetLiveViewFrame", handle) }
     override fun nativeRegisterProgressCallback(handle: Long, callback: com.nikon.app.jni.TransferProgressCallback) { rec("nativeRegisterProgressCallback", handle) }
+    override fun nativeSetStatusCallback(handle: Long, callback: com.nikon.app.jni.StatusChangeCallback) { rec("nativeSetStatusCallback", handle) }
     override fun nativeGetProperties(handle: Long, propIds: IntArray): LongArray? =
         LongArray(propIds.size).also { rec("nativeGetProperties", handle, propIds) }
     override fun nativeSetFtpConfig(

@@ -82,6 +82,10 @@ object CameraBridge : CameraApi {
     /** 注册传输进度回调(连接成功后调一次) */
     override external fun nativeRegisterProgressCallback(handle: Long, callback: TransferProgressCallback)
 
+    // ─── 连接状态回调(事件化,替代 UI 层轮询)──────────────────
+    /** 注册连接状态回调: native 状态机变化时即时回调, 无需轮询 nativeGetStatus */
+    override external fun nativeSetStatusCallback(handle: Long, callback: StatusChangeCallback)
+
     // ─── FTP 自动化 ─────────────────────────────────────────────
     /** 配置 FTP 服务器 (不立即连接)。字段对应 C 层 FtpConfig */
     override external fun nativeSetFtpConfig(

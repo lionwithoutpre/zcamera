@@ -50,6 +50,16 @@ static jmethodID g_progress_mid = NULL;
  * callback 引用, 导致 JNI 崩溃(use-after-free)。 */
 static pthread_mutex_t g_progress_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* ─── 连接状态回调桥接 ───
+ * native 状态机(core/api/camera_api.c _set_status_locked)在任何连接状态
+ * 变化时触发回调(连接成功/断开/USB 拔出/传输中…)。Kotlin 侧通过
+ * nativeSetStatusCallback 注册, 事件化替代 UI 层 1s 轮询 nativeGetStatus。
+ * 与进度回调同构: 全局引用 + mutex 保护, 回调在 native 状态机线程触发。 */
+static jobject      g_status_callback = NULL;
+static jclass       g_status_cls = NULL;
+static jmethodID    g_status_mid = NULL;
+static pthread_mutex_t g_status_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /* ─── JNI 线程附着缓存 ───
  * 进度回调来自 native 传输线程池, 高频触发。旧实现每次回调都
  * AttachCurrentThread + DetachCurrentThread, 开销大且 Detach 会清理
@@ -137,6 +147,18 @@ Java_com_nikon_app_jni_CameraBridge_nativeDestroy(JNIEnv *env, jclass cls,
         g_progress_mid = NULL;
     }
     pthread_mutex_unlock(&g_progress_mutex);
+    /* 释放状态回调的全局引用(与进度回调同构) */
+    pthread_mutex_lock(&g_status_mutex);
+    if (g_status_callback) {
+        (*env)->DeleteGlobalRef(env, g_status_callback);
+        g_status_callback = NULL;
+    }
+    if (g_status_cls) {
+        (*env)->DeleteGlobalRef(env, g_status_cls);
+        g_status_cls = NULL;
+        g_status_mid = NULL;
+    }
+    pthread_mutex_unlock(&g_status_mutex);
     CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
     if (api) {
         camera_api_destroy(api);
@@ -397,8 +419,62 @@ Java_com_nikon_app_jni_CameraBridge_nativeConnectWifi(JNIEnv *env, jclass cls,
 static void _reconnect_callback(ConnectionStatus status, void *user_data) {
     (void)user_data;
     LOGD("_reconnect_callback status=%d", status);
+    if (!g_jvm) return;
+
+    /* 加锁取局部副本, 释放后再调用, 避免持锁跨 JNI 调用(与进度回调同构) */
+    jobject    cb  = NULL;
+    jmethodID mid = NULL;
+    pthread_mutex_lock(&g_status_mutex);
+    cb  = g_status_callback;
+    mid = g_status_mid;
+    pthread_mutex_unlock(&g_status_mutex);
+    if (!cb || !mid) return;
+
+    JNIEnv *env = _get_thread_jni_env();
+    if (!env) return;
+
+    (*env)->CallVoidMethod(env, cb, mid, (jint)status);
 }
 
+/**
+ * 注册连接状态回调(事件化替代 UI 轮询 nativeGetStatus)。
+ * 与 nativeRegisterProgressCallback 同构: 全局引用 + 缓存 method id,
+ * 注册时释放旧引用避免泄漏。
+ */
+JNIEXPORT void JNICALL
+Java_com_nikon_app_jni_CameraBridge_nativeSetStatusCallback(JNIEnv *env,
+                                                            jclass cls,
+                                                            jlong handle,
+                                                            jobject callback) {
+    (void)cls;
+    CameraAPI *api = (CameraAPI *)(uintptr_t)handle;
+    if (!api || !callback) return;
+
+    pthread_mutex_lock(&g_status_mutex);
+    if (g_status_callback) {
+        (*env)->DeleteGlobalRef(env, g_status_callback);
+        g_status_callback = NULL;
+    }
+    if (g_status_cls) {
+        (*env)->DeleteGlobalRef(env, g_status_cls);
+        g_status_cls = NULL;
+        g_status_mid = NULL;
+    }
+    g_status_callback = (*env)->NewGlobalRef(env, callback);
+
+    jclass cls_local = (*env)->GetObjectClass(env, callback);
+    if (cls_local) {
+        g_status_mid = (*env)->GetMethodID(env, cls_local, "onStatusChanged", "(I)V");
+        g_status_cls = (jclass)(*env)->NewGlobalRef(env, cls_local);
+        (*env)->DeleteLocalRef(env, cls_local);
+    }
+    pthread_mutex_unlock(&g_status_mutex);
+
+    camera_api_on_status_change(api, _reconnect_callback, NULL);
+    LOGD("nativeSetStatusCallback registered");
+}
+
+/* 保留旧符号: nativeSetReconnectCallback — 历史 JNI 命名, 现委托到状态回调注册 */
 JNIEXPORT void JNICALL
 Java_com_nikon_app_jni_CameraBridge_nativeSetReconnectCallback(JNIEnv *env,
                                                                 jclass cls,

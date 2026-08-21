@@ -18,6 +18,17 @@ interface TransferProgressCallback {
 }
 
 /**
+ * 连接状态回调 — native 状态机变化时由 JNI 回调。
+ *
+ * 替代 UI 层 1s 轮询 nativeGetStatus: 状态变化(native 层 CONNECTED /
+ * DISCONNECTED / ERROR 等)即时推送, 消除轮询延迟与无谓的 JNI 跨边界开销。
+ * [status] 为 [CameraBridge] 的 STATUS_* 常量。
+ */
+interface StatusChangeCallback {
+    fun onStatusChanged(status: Int)
+}
+
+/**
  * CameraBridge 的抽象接口。ViewModel 依赖此接口而非具体的 CameraBridge object,
  * 以便单元测试注入 mock。
  *
@@ -74,6 +85,9 @@ interface CameraApi {
 
     /** 注册传输进度回调(连接成功后调一次) */
     fun nativeRegisterProgressCallback(handle: Long, callback: TransferProgressCallback)
+
+    /** 注册连接状态回调(事件化替代 UI 轮询 nativeGetStatus) */
+    fun nativeSetStatusCallback(handle: Long, callback: StatusChangeCallback)
 
     /** 配置 FTP 服务器 (不立即连接)。字段对应 C 层 FtpConfig */
     fun nativeSetFtpConfig(

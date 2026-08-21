@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.nikon.app.ble.BleManager
 import com.nikon.app.jni.CameraApi
 import com.nikon.app.jni.CameraBridge
+import com.nikon.app.jni.StatusChangeCallback
 import com.nikon.app.jni.TransferProgressCallback
 import com.nikon.app.transfer.TransferManager
 import com.nikon.data.settings.SettingsRepository
@@ -191,55 +192,33 @@ class CameraViewModel(
     // Service 启动后 Application.cameraHandle 有值,所有方法读 _handle 即可。
 
     init {
-        // 轻量轮询:检测 Service 何时就绪(handle 从 0 变非 0)
-        // 以及连接状态变化(USB 拔出等 native 层主动断开的场景)
+        // 轻量轮询:仅检测 Service 何时就绪(handle 从 0 变非 0) / 销毁(非 0→0)。
+        // 连接状态不再轮询 —— native 状态机变化通过 [statusCallback] 即时回调
+        // (USB 拔出等 native 层主动断开也会回调 DISCONNECTED)。
         // 测试可关闭(enablePolling=false)以避免虚拟时钟下自旋。
-        if (enablePolling) startStatusPolling()
+        if (enablePolling) startServiceReadyPolling()
+    }
+
+    /** native 状态回调实现: 连接状态事件化推送(替代 1s 轮询 nativeGetStatus)。 */
+    private val statusCallback = object : StatusChangeCallback {
+        override fun onStatusChanged(status: Int) = onNativeStatusChanged(status)
     }
 
     /**
-     * 每 1s 轮询:
-     * 1) handle 从 0→非0:Service 就绪,更新 serviceReady
-     * 2) handle 非0:调 nativeGetStatus 同步 _status(USB 拔出时 native 层会切 DISCONNECTED)
-     * 3) handle 从 非0→0:Service 销毁,更新 serviceReady + 状态
+     * 每 1s 轻量轮询 Service 生命周期(handle 0↔非0), 并在就绪时注册状态回调。
+     * 注意: 不做 nativeGetStatus 轮询 —— 状态变化由 native 回调驱动, 消除轮询延迟。
      */
-    private fun startStatusPolling() {
+    private fun startServiceReadyPolling() {
         statusPollJob?.cancel()
         statusPollJob = viewModelScope.launch {
             while (isActive) {
                 val h = _handle
                 if (h != 0L) {
-                    if (!_serviceReady.value) _serviceReady.value = true
-                    // 双向同步连接状态:
-                    //  - 向上: CameraService 自动连接成功 (USB fd 注入) 后 native 变 CONNECTED。
-                    //    旧逻辑只做降级同步, 导致 UI 永远停留在"未连接"扫描页。
-                    //  - 向下: native 层可能因 USB 拔出主动断开。
-                    try {
-                        val nativeStatus = withContext(ioDispatcher) {
-                            bridge.nativeGetStatus(h)
-                        }
-                        when (nativeStatus) {
-                            CameraBridge.STATUS_CONNECTED -> {
-                                val local = _status.value
-                                if (local != CameraBridge.STATUS_CONNECTED &&
-                                    local != CameraBridge.STATUS_TRANSFERRING &&
-                                    local != CameraBridge.STATUS_CONNECTING &&
-                                    local != CameraBridge.STATUS_SCANNING) {
-                                    _status.value = CameraBridge.STATUS_CONNECTED
-                                    onNativeConnected(h)
-                                }
-                            }
-                            CameraBridge.STATUS_DISCONNECTED,
-                            CameraBridge.STATUS_ERROR -> {
-                                if (_status.value == CameraBridge.STATUS_CONNECTED ||
-                                    _status.value == CameraBridge.STATUS_TRANSFERRING) {
-                                    _status.value = nativeStatus
-                                    propPollJob?.cancel()
-                                }
-                            }
-                            else -> Unit
-                        }
-                    } catch (_: Exception) { }
+                    if (!_serviceReady.value) {
+                        _serviceReady.value = true
+                        // Service 就绪时注册状态回调(覆盖自动连接成功场景)
+                        registerStatusCallback(h)
+                    }
                 } else {
                     if (_serviceReady.value) {
                         _serviceReady.value = false
@@ -251,6 +230,41 @@ class CameraViewModel(
         }
     }
 
+    /** 注册连接状态回调(幂等: 重复注册会替换旧回调)。 */
+    private fun registerStatusCallback(h: Long) {
+        try {
+            bridge.nativeSetStatusCallback(h, statusCallback)
+        } catch (_: Exception) { }
+    }
+
+    /**
+     * native 状态机回调入口(可能来自 USB 拔出/自动连接成功等 native 侧状态变化)。
+     * 逻辑与旧轮询内的状态同步一致, 只是触发方式从"轮询"变为"事件"。
+     */
+    private fun onNativeStatusChanged(nativeStatus: Int) {
+        when (nativeStatus) {
+            CameraBridge.STATUS_CONNECTED -> {
+                val local = _status.value
+                if (local != CameraBridge.STATUS_CONNECTED &&
+                    local != CameraBridge.STATUS_TRANSFERRING &&
+                    local != CameraBridge.STATUS_CONNECTING &&
+                    local != CameraBridge.STATUS_SCANNING) {
+                    _status.value = CameraBridge.STATUS_CONNECTED
+                    onNativeConnected(_handle)
+                }
+            }
+            CameraBridge.STATUS_DISCONNECTED,
+            CameraBridge.STATUS_ERROR -> {
+                if (_status.value == CameraBridge.STATUS_CONNECTED ||
+                    _status.value == CameraBridge.STATUS_TRANSFERRING) {
+                    _status.value = nativeStatus
+                    propPollJob?.cancel()
+                }
+            }
+            else -> Unit
+        }
+    }
+
     /**
      * native 层进入 CONNECTED 时补齐连接后的初始化 (注册传输进度回调 + 启动参数轮询)。
      * 手动 connect()/connectWifi() 已各自处理; 这里覆盖 CameraService 自动连接
@@ -258,6 +272,7 @@ class CameraViewModel(
      */
     private fun onNativeConnected(h: Long) {
         bridge.nativeRegisterProgressCallback(h, transferProgressCallback)
+        registerStatusCallback(h)
         startPropertyPolling()
     }
 
@@ -322,8 +337,9 @@ class CameraViewModel(
             }
             if (rc == CameraBridge.CAM_OK) {
                 _status.value = CameraBridge.STATUS_CONNECTED
-                // 注册传输进度回调
+                // 注册传输进度回调 + 状态回调
                 bridge.nativeRegisterProgressCallback(_handle, transferProgressCallback)
+                registerStatusCallback(_handle)
                 startPropertyPolling()
             } else {
                 _status.value = CameraBridge.STATUS_ERROR
@@ -346,6 +362,7 @@ class CameraViewModel(
             if (rc == CameraBridge.CAM_OK) {
                 _status.value = CameraBridge.STATUS_CONNECTED
                 bridge.nativeRegisterProgressCallback(_handle, transferProgressCallback)
+                registerStatusCallback(_handle)
                 startPropertyPolling()
                 // 持久化本次连接端点: 供 CameraService WiFi 断连后真正重连使用
                 settingsRepo.saveLastWifiEndpoint(ip, port)
